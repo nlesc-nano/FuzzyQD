@@ -32,3 +32,5 @@ settings:
   fcc: true  # FCC crystal flag
   cube_input: true  # Whether to use cube files as input
 
+logging:
+  level: INFO 

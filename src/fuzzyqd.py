@@ -8,7 +8,7 @@ import re
 import numpy as np
 import funcs as bse
 import matplotlib.pyplot as plt
-
+from logger_config import logger, setup_logger
 
 def main():
     # Load Input Data from YAML
@@ -20,6 +20,12 @@ def main():
     with open(yaml_file_path, 'r') as file:
         params = yaml.safe_load(file)
 
+    # Set up the logger
+    logging_level = params.get("logging", {}).get("level", "INFO")
+    setup_logger(logging_level)  # Dynamically adjust the logger's level
+
+    logger.info("FuzzyQD started.")
+
     # Check if block processing is required
     if 'blocks' in params['files']:
         handle_blocks(params, yaml_file_path)
@@ -27,7 +33,6 @@ def main():
 
     # If no blocks are defined, continue with the main BSE calculations
     perform_bse_calculations(params)
-
 
 def handle_blocks(params, yaml_file_path):
     """Handle block folder creation and processing based on input YAML."""
@@ -170,11 +175,6 @@ def perform_bse_calculations(params):
 
     # If 'block_index' exists in params['files'], include it in the log file name
     block_index = params['files'].get('block_index', None)
-    if block_index is not None:
-        log_file = f"{file_specifiers['Project']}_{block_index}.log"
-    else:
-        log_file = f"{file_specifiers['Project']}.log"
-
     k_path, kappa_path = [], []
 
     for s in range(k_path_points.shape[0] - 1):
@@ -188,9 +188,9 @@ def perform_bse_calculations(params):
     h5_input = not cube_input
 
     if cube_input:
-        bse_folded_states, state_nr, files_processed = bse.bse_cube(file_specifiers, log_file, k_path, kappa_path, calculation_data)
+        bse_folded_states, state_nr, files_processed = bse.bse_cube(file_specifiers, k_path, kappa_path, calculation_data)
     elif h5_input:
-        bse_folded_states, state_nr, files_processed = bse.bse_h5(file_specifiers, log_file, k_path, kappa_path, calculation_data)
+        bse_folded_states, state_nr, files_processed = bse.bse_h5(file_specifiers, k_path, kappa_path, calculation_data)
 
     # Post-processing
     project = file_specifiers['Project']
@@ -198,7 +198,7 @@ def perform_bse_calculations(params):
         if not re_run:  # Use the pre-defined re_run variable
             bse.write_path(project, k_path_names, kappa_ticks, kappa_path)
         bse.write_bse_folded(project, state_nr, bse_folded_states)
-        bse.log_output("Bloch state expansion saved as NumPy array", log_file)
+        logger.info("Bloch state expansion saved as NumPy array")
 
 if __name__ == "__main__":
     main()

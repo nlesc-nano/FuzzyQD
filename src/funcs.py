@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import rotate
 from itertools import permutations
 from joblib import Parallel, delayed
+from logger_config import logger
 
 #%% Function definitions
 
@@ -58,7 +59,7 @@ def read_dummy_cube(path):
         data = data.reshape((nx, ny, nz))
     
     end_time = time.time()
-    print(f"read_dummy_cube executed in {end_time - start_time:.6f} seconds")
+    logger.debug(f"read_dummy_cube executed in {end_time - start_time:.6f} seconds")
     return data, meta
 
 def read_cube(fname):
@@ -104,15 +105,8 @@ def read_cube(fname):
         data, atom_Z, atom_pos = np.array([]), np.array([]), np.array([])
     
     end_time = time.time()
-    print(f"read_cube executed in {end_time - start_time:.6f} seconds")
+    logger.info(f"read_cube executed in {end_time - start_time:.6f} seconds")
     return data, meta, atom_Z, atom_pos, no_error
-
-def log_output(log_string, log_file):
-
-    print(log_string)
-    with open(log_file, 'a') as log:
-        log.write(log_string + '\n')
-    return
 
 def set_index(e_k):
     """
@@ -140,12 +134,12 @@ def set_index(e_k):
     label = int(np.sum(np.abs(index)) - 1)
 
     # Print detailed information for verification
-    print(f"Input vector (e_k): {e_k}")
-    print(f"Crystallographic index (scaled vector): {index}")
-    print(f"Label (sum of absolute values of scaled indices - 1): {label}")
+    logger.debug(f"Input vector (e_k): {e_k}")
+    logger.debug(f"Crystallographic index (scaled vector): {index}")
+    logger.debug(f"Label (sum of absolute values of scaled indices - 1): {label}")
 
     end_time = time.time()
-    print(f"set_index executed in {end_time - start_time:.6f} seconds")
+    logger.debug(f"set_index executed in {end_time - start_time:.6f} seconds")
 
     return index, label
 
@@ -170,38 +164,38 @@ def k_path_segment(k1, k2, e_k_dict, dk_set):
     e_k = k2 - k1
     norm_k = np.linalg.norm(e_k)
     e_k /= norm_k  # Normalized unit vector along the segment
-    print(f"Normalized direction vector (e_k): {e_k}")
+    logger.debug(f"Normalized direction vector (e_k): {e_k}")
 
     # Identify the segment direction and get the direction label
     index, label = set_index(e_k)
-    print(f"Segment direction index: {index}, label: {label}")
+    logger.debug(f"Segment direction index: {index}, label: {label}")
 
     # Determine sign based on direction vectors in e_k_dict
     sign = 1
     vectors = e_k_dict[label]['positive_dir']
     N_d = np.size(vectors, axis=0)
-    print(f"Number of direction vectors (N_d): {N_d}")
+    logger.debug(f"Number of direction vectors (N_d): {N_d}")
     for v in range(N_d):
         dot_product = np.dot(e_k, vectors[v, :])
-        print(f"Dot product with direction vector {v}: {dot_product}")
+        logger.debug(f"Dot product with direction vector {v}: {dot_product}")
         if abs(dot_product) > 0.99999:
             sign = round(dot_product)
-    print(f"Sign of the direction: {sign}")
+    logger.debug(f"Sign of the direction: {sign}")
     # Calculate initial and final parallel positions of the segment in BZ1
     kappa_1 = np.dot(k1, e_k)
     kappa_2 = np.dot(k2, e_k)
-    print(f"Initial parallel position (kappa_1): {kappa_1}")
-    print(f"Final parallel position (kappa_2): {kappa_2}")
+    logger.debug(f"Initial parallel position (kappa_1): {kappa_1}")
+    logger.debug(f"Final parallel position (kappa_2): {kappa_2}")
 
     # Get position vector of the line
     k_0 = k1 - kappa_1 * e_k
-    print(f"Position vector of the line (k_0): {k_0}")
+    logger.debug(f"Position vector of the line (k_0): {k_0}")
 
     # Determine the number of points along the segment
     N_k = closest((kappa_2 - kappa_1) / dk_set)
     dk_real = (kappa_2 - kappa_1) / N_k
     kappa = np.linspace(kappa_1, kappa_2 - dk_real, N_k)
-    print(f"Number of points (N_k): {N_k}, Real spacing (dk_real): {dk_real}")
+    logger.debug(f"Number of points (N_k): {N_k}, Real spacing (dk_real): {dk_real}")
 
     # Calculate rotation angles
     if label == 0:
@@ -210,7 +204,7 @@ def k_path_segment(k1, k2, e_k_dict, dk_set):
         angle_1 = -np.arcsin(sign * e_k[1] / np.sqrt(e_k[0]**2 + e_k[1]**2))
         angle_2 = -np.arcsin(sign * e_k[2])
     angle = np.array([angle_1, angle_2])
-    print(f"Rotation angles: {angle}")
+    logger.debug(f"Rotation angles: {angle}")
 
     # Calculate perpendicular basis vectors
     if label == 0:
@@ -221,7 +215,7 @@ def k_path_segment(k1, k2, e_k_dict, dk_set):
             [np.sin(angle[0]), np.cos(angle[0]), 0],
             [np.sin(angle[1]) * np.cos(angle[0]), -np.sin(angle[1]) * np.sin(angle[0]), np.cos(angle[1])]
         ])
-    print(f"Perpendicular basis vectors (k_perp_basis):\n{k_perp_basis}")
+    logger.debug(f"Perpendicular basis vectors (k_perp_basis):\n{k_perp_basis}")
     # Create dictionary containing the k-path segment information
     k_segment = {
         'dir': label,
@@ -241,7 +235,7 @@ def k_path_segment(k1, k2, e_k_dict, dk_set):
     }
 
     end_time = time.time()
-    print(f"k_path_segment executed in {end_time - start_time:.6f} seconds")
+    logger.debug(f"k_path_segment executed in {end_time - start_time:.6f} seconds")
 
     return k_segment
 
@@ -263,16 +257,16 @@ def set_r_para_sign(direction, direction_vector, e_k_dict):
     for d in range(3):
         vectors = e_k_dict[d]['positive_dir']
         N_d = vectors.shape[0]  # More Pythonic way to get the number of rows
-        print(f"Checking direction {d}, Number of vectors (N_d): {N_d}")
+        logger.debug(f"Checking direction {d}, Number of vectors (N_d): {N_d}")
         for v in range(N_d):
             dot_product = np.dot(direction_vector, vectors[v, :])
-            print(f"Dot product with vector {v} in direction {d}: {dot_product}")
+            logger.debug(f"Dot product with vector {v} in direction {d}: {dot_product}")
             if abs(dot_product) == 1:
                 sign = int(np.sign(dot_product))
-                print(f"Sign found: {sign}")
+                logger.debug(f"Sign found: {sign}")
 
     end_time = time.time()
-    print(f"set_r_para_sign executed in {end_time - start_time:.6f} seconds")
+    logger.debug(f"set_r_para_sign executed in {end_time - start_time:.6f} seconds")
 
     return sign
 
@@ -302,11 +296,11 @@ def summary_k_path(k_path, segments, a_dx):
         d = segment['dir']  # Identify segment type: 0 = (100), 1 = (110), 2 = (111)
         pos_dir[d, n_dir[d]] = s  # Store position of the segment
         n_dir[d] += 1  # Increment the count of the segment type
-        print(f"Segment {s}: direction {d}, current count of type {d}: {n_dir[d]}")
+        logger.debug(f"Segment {s}: direction {d}, current count of type {d}: {n_dir[d]}")
 
     # Calculate Nyquist limit
     Nyq = math.floor(0.5 * ((a_dx / np.sqrt(3)) - 2))
-    print(f"Calculated Nyquist limit (Nyq): {Nyq}")
+    logger.debug(f"Calculated Nyquist limit (Nyq): {Nyq}")
 
     # Create summary dictionary
     k_structure = {
@@ -316,11 +310,11 @@ def summary_k_path(k_path, segments, a_dx):
     }
 
     end_time = time.time()
-    print(f"summary_k_path executed in {end_time - start_time:.6f} seconds")
-    print("Summary of k-path:")
-    print(f"Number of segments (n_dir): {n_dir}")
-    print(f"Positions of segments (pos_dir):\n{pos_dir}")
-    print(f"Nyquist limit: {Nyq}")
+    logger.debug(f"summary_k_path executed in {end_time - start_time:.6f} seconds")
+    logger.debug("Summary of k-path:")
+    logger.debug(f"Number of segments (n_dir): {n_dir}")
+    logger.debug(f"Positions of segments (pos_dir):\n{pos_dir}")
+    logger.debug(f"Nyquist limit: {Nyq}")
 
     return k_structure
 
@@ -354,7 +348,7 @@ def rotate_psi(psi, k_segment):
     dir_k = k_segment['dir_k']
     direction = k_segment['dir']
 
-    print("Initial axis assignment:", axis_id)
+    logger.debug("Initial axis assignment:", axis_id)
 
     # Axis assignment for (100) segments
     if direction == 0:
@@ -362,23 +356,23 @@ def rotate_psi(psi, k_segment):
             axis_id = np.array([1, 0, 2], dtype=int)
         elif abs(dir_k[2]) > 0.999999:
             axis_id = np.array([2, 1, 0], dtype=int)
-        print("Updated axis assignment for (100):", axis_id)
+        logger.debug("Updated axis assignment for (100):", axis_id)
     # Rotations for (110) segments
     if direction == 1:
         angle_1 = np.degrees(k_segment['rot_angle'][0])
         angle_2 = np.degrees(k_segment['rot_angle'][1])
-        print(f"Rotation angles for (110): angle_1 = {angle_1}, angle_2 = {angle_2}")
+        logger.debug(f"Rotation angles for (110): angle_1 = {angle_1}, angle_2 = {angle_2}")
 
         if abs(dir_k[2]) < 1e-6:
             psi_rot = rotate(psi, angle=angle_1, axes=(0, 1), reshape=True)
-            print("Rotated wavefunction around y-axis by angle_1.")
+            logger.debug("Rotated wavefunction around y-axis by angle_1.")
         elif abs(dir_k[1]) < 1e-6:
             psi_rot = rotate(psi, angle=angle_2, axes=(0, 2), reshape=True)
-            print("Rotated wavefunction around z-axis by angle_2.")
+            logger.debug("Rotated wavefunction around z-axis by angle_2.")
         elif abs(dir_k[0]) < 1e-6:
             psi_i = rotate(psi, angle=angle_1, axes=(0, 1), reshape=True)
             psi_rot = rotate(psi_i, angle=angle_2, axes=(0, 2), reshape=True)
-            print("Performed two rotations for (111): first by angle_1, then by angle_2.")
+            logger.debug("Performed two rotations for (111): first by angle_1, then by angle_2.")
 
         # Set parallel and perpendicular coordinates
         N_par = psi_rot.shape[0]
@@ -390,10 +384,10 @@ def rotate_psi(psi, k_segment):
 
     # Set the sign of the parallel coordinate according to the direction sign
     r_par *= k_segment['r_par_sign']
-    print("Adjusted parallel coordinates with direction sign.")
+    logger.debug("Adjusted parallel coordinates with direction sign.")
 
     end_time = time.time()
-    print(f"rotate_psi executed in {end_time - start_time:.6f} seconds")
+    logger.info(f"rotate_psi executed in {end_time - start_time:.6f} seconds")
 
     return psi_rot, r_par, r_perp_0, r_perp_1, axis_id
 
@@ -422,19 +416,19 @@ def rotate_psi_111(psi, k_segment):
     angle = k_segment['rot_angle']
     angle_1, angle_2 = np.degrees(angle[0]), np.degrees(angle[1])
     sign = k_segment['r_par_sign']
-    print(f"Rotation angles: angle_1 = {angle_1}, angle_2 = {angle_2}, sign = {sign}")
+    logger.debug(f"Rotation angles: angle_1 = {angle_1}, angle_2 = {angle_2}, sign = {sign}")
 
     # Perform the first rotation
     psi_i = rotate(psi, angle=sign * angle_1, axes=(0, 1), reshape=True)
-    print(f"Rotated wavefunction around z-axis by angle_1 ({sign * angle_1} degrees).")
+    logger.debug(f"Rotated wavefunction around z-axis by angle_1 ({sign * angle_1} degrees).")
 
     # Perform the second rotation
     psi_rot = rotate(psi_i, angle=sign * angle_2, axes=(0, 2), reshape=True)
-    print(f"Rotated wavefunction around y-axis by angle_2 ({sign * angle_2} degrees).")
+    logger.debug(f"Rotated wavefunction around y-axis by angle_2 ({sign * angle_2} degrees).")
 
     # Set axis assignment
     axis_id = np.array([0, 1, 2], dtype=int)
-    print(f"Axis assignment: {axis_id}")
+    logger.debug(f"Axis assignment: {axis_id}")
 
     # Set parallel and perpendicular coordinates
     N_par = psi_rot.shape[axis_id[0]]
@@ -445,10 +439,10 @@ def rotate_psi_111(psi, k_segment):
 
     # Set the sign of the parallel coordinate
     r_par *= sign
-    print(f"Adjusted parallel coordinates with direction sign: {sign}")
+    logger.debug(f"Adjusted parallel coordinates with direction sign: {sign}")
 
     end_time = time.time()
-    print(f"rotate_psi_111 executed in {end_time - start_time:.6f} seconds")
+    logger.info(f"rotate_psi_111 executed in {end_time - start_time:.6f} seconds")
 
     return psi_rot, r_par, r_perp_0, r_perp_1, axis_id
 
@@ -472,31 +466,31 @@ def set_bundle_100(b, k_segment, k_structure):
     dir_index = k_segment['indices']
     mask_1, mask_2 = get_masks(k_segment['dir'], dir_index)
     N = k_structure['Nyquist']
-    print(f"Bundle index: {b}, Direction index: {dir_index}, Nyquist limit: {N}")
+    logger.debug(f"Bundle index: {b}, Direction index: {dir_index}, Nyquist limit: {N}")
 
     # Create in-plane coordinates based on the bundle index (b)
     if b == 0:
         k_0_0, k_0_1 = np.linspace(-N, N, 2 * N + 1), np.linspace(-N, N, 2 * N + 1)
     else:
         k_0_0, k_0_1 = np.linspace(-N, N - 1, 2 * N), np.linspace(-N, N - 1, 2 * N)
-    print(f"In-plane coordinates (k_0_0, k_0_1) created for bundle {b}.")
+    logger.debug(f"In-plane coordinates (k_0_0, k_0_1) created for bundle {b}.")
 
     # Calculate k_0 perpendicular coordinates
     k_0 = k_segment['pos_k']
     k_0_perp = np.array([np.dot(mask_1, k_0), np.dot(mask_2, k_0)])
-    print(f"k_0 perpendicular coordinates: {k_0_perp}")
+    logger.debug(f"k_0 perpendicular coordinates: {k_0_perp}")
 
     # Create array with k0 coordinates of the bundle
     k0_origin = k_segment['origin_bun'][b]
     k0_origin_perp = np.array([np.dot(mask_1, k0_origin), np.dot(mask_2, k0_origin)])
     k_0_0 += k0_origin_perp[0] + k_0_perp[0]
     k_0_1 += k0_origin_perp[1] + k_0_perp[1]
-    print(f"Adjusted in-plane coordinates for bundle {b}: k_0_0 and k_0_1.")
+    logger.debug(f"Adjusted in-plane coordinates for bundle {b}: k_0_0 and k_0_1.")
 
     # Set kappa array
     N_k = k_segment['kappa'].size
     dk = k_segment['dk']
-    print(f"Number of kappa points (N_k): {N_k}, dk: {dk}")
+    logger.debug(f"Number of kappa points (N_k): {N_k}, dk: {dk}")
 
     # Initialize kappa array for the bundle
     if b == 0:
@@ -506,7 +500,7 @@ def set_bundle_100(b, k_segment, k_structure):
             kappa_1 = k_segment['kappa_12'][0] + N_zone
             kappa_2 = k_segment['kappa_12'][1] + N_zone
             kappa[:, i] = np.linspace(kappa_1, kappa_2 - dk, N_k)
-#            print(f"kappa values for bundle {b}, zone {N_zone}: {kappa[:, i]}")
+#            logger.debug(f"kappa values for bundle {b}, zone {N_zone}: {kappa[:, i]}")
     else:
         kappa = np.zeros((N_k, 2 * N))
         for i in range(2 * N):
@@ -514,7 +508,7 @@ def set_bundle_100(b, k_segment, k_structure):
             kappa_1 = k_segment['kappa_12'][0] + N_zone
             kappa_2 = k_segment['kappa_12'][1] + N_zone
             kappa[:, i] = np.linspace(kappa_1, kappa_2 - dk, N_k)
-#            print(f"kappa values for bundle {b}, zone {N_zone}: {kappa[:, i]}")
+#            logger.debug(f"kappa values for bundle {b}, zone {N_zone}: {kappa[:, i]}")
 
     # Create the bundle dictionary
     bundle = {
@@ -526,7 +520,7 @@ def set_bundle_100(b, k_segment, k_structure):
     }
 
     end_time = time.time()
-    print(f"set_bundle_100 executed in {end_time - start_time:.6f} seconds")
+    logger.debug(f"set_bundle_100 executed in {end_time - start_time:.6f} seconds")
 
     return bundle
 
@@ -548,18 +542,18 @@ def combinations_110_bis(k_segment, l, b, Nyq):
     # Extract sign and calculate the direction index
     sign = k_segment['r_par_sign']
     index = sign * k_segment['indices']
-    print(f"Sign: {sign}, Direction indices: {index}")
+    logger.debug(f"Sign: {sign}, Direction indices: {index}")
 
     # Generate n_2 values for the BZ structure
     n_2 = np.linspace(-Nyq, Nyq - b, 2 * Nyq + 1 - b)
-    print(f"n_2 values: {n_2}")
+    logger.debug(f"n_2 values: {n_2}")
 
     # Create BZ_2D structure based on l value
     if l == 0:
         BZ_2D = np.array([[0, 0]])
     else:
         BZ_2D = np.array([[l, 0], [0, l]])
-    print(f"BZ_2D structure: {BZ_2D}")
+    logger.debug(f"BZ_2D structure: {BZ_2D}")
 
     # Determine position indices for y and z based on direction index
     pos_y, pos_z = 1, 2
@@ -567,7 +561,7 @@ def combinations_110_bis(k_segment, l, b, Nyq):
         pos_y, pos_z = 2, 1
     elif abs(index[0]) < 1e-6:
         pos_y, pos_z = 2, 0
-    print(f"Position indices - pos_y: {pos_y}, pos_z: {pos_z}")
+    logger.debug(f"Position indices - pos_y: {pos_y}, pos_z: {pos_z}")
 
     # Efficiently repeat and tile arrays for BZ calculation
     repeat_BZ_2D = np.repeat(BZ_2D, n_2.shape[0], axis=0)
@@ -577,10 +571,10 @@ def combinations_110_bis(k_segment, l, b, Nyq):
     BZ = np.hstack((repeat_BZ_2D[:, :pos_z], tiled_n_2, repeat_BZ_2D[:, pos_z:]))
     BZ[:, pos_y] *= index[pos_y]
     BZ += k_segment['origin_bun'][b]
-    print(f"Final BZ array: {BZ}")
+    logger.debug(f"Final BZ array: {BZ}")
 
     end_time = time.time()
-    print(f"combinations_110_bis executed in {end_time - start_time:.6f} seconds")
+    logger.debug(f"combinations_110_bis executed in {end_time - start_time:.6f} seconds")
 
     return BZ
 
@@ -607,12 +601,12 @@ def set_bundle_110(BZ, l, b, k_segment, k_structure):
     mask_1, mask_2 = get_masks(k_segment['dir'], dir_index)
     N = k_structure['Nyquist']
     basis = k_segment['k_perp_basis']
-    print(f"Bundle index: {b}, Direction index: {dir_index}, Nyquist limit: {N}")
+    logger.debug(f"Bundle index: {b}, Direction index: {dir_index}, Nyquist limit: {N}")
 
     # Create array with k0 coordinates of the layer in the bundle
     e_par = basis[0]
     e_perp_0, e_perp_1 = basis[1], basis[2]
-    print(f"Basis vectors - e_par: {e_par}, e_perp_0: {e_perp_0}, e_perp_1: {e_perp_1}")
+    logger.debug(f"Basis vectors - e_par: {e_par}, e_perp_0: {e_perp_0}, e_perp_1: {e_perp_1}")
 
     # Calculate k_perp_0 and k_perp_1
     k_perp_0 = np.sum(BZ * e_perp_0, axis=1)
@@ -620,14 +614,14 @@ def set_bundle_110(BZ, l, b, k_segment, k_structure):
     k_0 = k_segment['pos_k']
     k_perp_0 += np.dot(e_perp_0, k_0)
     k_perp_1 += np.dot(e_perp_1, k_0)
-    print(f"k_perp_0: {k_perp_0}, k_perp_1: {k_perp_1}")
+    logger.debug(f"k_perp_0: {k_perp_0}, k_perp_1: {k_perp_1}")
     # Set kappa array
     N_k = k_segment['kappa'].size
     dk = k_segment['dk']
     n_min = l - 2 * N
     n_max = 2 * (N - b) - l
     n_kappa = round((n_max - n_min) / 2 + 1)
-    print(f"Number of kappa points (N_k): {N_k}, dk: {dk}, n_min: {n_min}, n_max: {n_max}, n_kappa: {n_kappa}")
+    logger.debug(f"Number of kappa points (N_k): {N_k}, dk: {dk}, n_min: {n_min}, n_max: {n_max}, n_kappa: {n_kappa}")
 
     # Initialize kappa array for the bundle
     kappa = np.zeros((N_k, n_kappa))
@@ -637,7 +631,7 @@ def set_bundle_110(BZ, l, b, k_segment, k_structure):
         kappa_1 = kappa_0 + k_segment['kappa_12'][0] + N_zone / k_segment['scale']
         kappa_2 = kappa_0 + k_segment['kappa_12'][1] + N_zone / k_segment['scale']
         kappa[:, i] = np.linspace(kappa_1, kappa_2 - dk, N_k)
-#        print(f"kappa values for bundle {b}, zone {N_zone}: {kappa[:, i]}")
+#        logger.debug(f"kappa values for bundle {b}, zone {N_zone}: {kappa[:, i]}")
 
     # Create the bundle dictionary
     bundle = {
@@ -649,7 +643,7 @@ def set_bundle_110(BZ, l, b, k_segment, k_structure):
     }
 
     end_time = time.time()
-    print(f"set_bundle_110 executed in {end_time - start_time:.6f} seconds")
+    logger.debug(f"set_bundle_110 executed in {end_time - start_time:.6f} seconds")
 
     return bundle
 
@@ -673,7 +667,7 @@ def combinations_111(width, length, bundle, k_segment):
     """
 
     start_time = time.time()
-    print(f"Starting combinations_111 with width={width}, length={length}, bundle={bundle}")
+    logger.debug(f"Starting combinations_111 with width={width}, length={length}, bundle={bundle}")
 
     # Retrieve parameters from k_segment
     sign = k_segment['r_par_sign']
@@ -684,7 +678,7 @@ def combinations_111(width, length, bundle, k_segment):
     all_cells = set(permutations(cell))  # Unique permutations
     all_cells_array = np.array(list(all_cells))
 
-    print("Generated initial cell permutations.")
+    logger.debug("Generated initial cell permutations.")
     
     # Adjust cells based on index sign conditions
     if np.sum(index) < 1.00001:
@@ -700,7 +694,7 @@ def combinations_111(width, length, bundle, k_segment):
     BZ = all_cells_array.astype(float)
     BZ += k_segment['origin_bun'][bundle]
 
-    print(f"combinations_111 completed in {time.time() - start_time:.4f} seconds")
+    logger.debug(f"combinations_111 completed in {time.time() - start_time:.4f} seconds")
     return BZ
 
 
@@ -728,7 +722,7 @@ def set_bundle_111(BZ, w, l, b, k_segment, k_structure):
     mask_1, mask_2 = get_masks(k_segment['dir'], dir_index)
     N = k_structure['Nyquist']
     basis = k_segment['k_perp_basis']
-    print(f"Bundle index: {b}, Direction index: {dir_index}, Nyquist limit: {N}")
+    logger.debug(f"Bundle index: {b}, Direction index: {dir_index}, Nyquist limit: {N}")
 
     # Create array with k0 coordinates of the layer in the bundle
     e_par = basis[0]
@@ -738,7 +732,7 @@ def set_bundle_111(BZ, w, l, b, k_segment, k_structure):
     # Use np.dot for optimized multiplication
     k_perp_0 = np.dot(BZ, e_perp_0) + np.dot(e_perp_0, k_0)
     k_perp_1 = np.dot(BZ, e_perp_1) + np.dot(e_perp_1, k_0)
-    print(f"k_perp_0: {k_perp_0}, k_perp_1: {k_perp_1}")
+    logger.debug(f"k_perp_0: {k_perp_0}, k_perp_1: {k_perp_1}")
 
     # Set kappa array using vectorized calculations
     N_k = k_segment['kappa'].size
@@ -746,7 +740,7 @@ def set_bundle_111(BZ, w, l, b, k_segment, k_structure):
     n_min = w + l - 3 * N
     n_max = 3 * (N - b) + l - 2 * w
     n_kappa = round((n_max - n_min) / 3 + 1)
-    print(f"Number of kappa points (N_k): {N_k}, dk: {dk}, n_min: {n_min}, n_max: {n_max}, n_kappa: {n_kappa}")
+    logger.debug(f"Number of kappa points (N_k): {N_k}, dk: {dk}, n_min: {n_min}, n_max: {n_max}, n_kappa: {n_kappa}")
 
     # Initialize kappa array for the bundle
     kappa = np.zeros((N_k, n_kappa))
@@ -756,7 +750,7 @@ def set_bundle_111(BZ, w, l, b, k_segment, k_structure):
         kappa_1 = kappa_0 + k_segment['kappa_12'][0] + n_cell * k_segment['scale']
         kappa_2 = kappa_0 + k_segment['kappa_12'][1] + n_cell * k_segment['scale']
         kappa[:, i] = np.linspace(kappa_1, kappa_2 - dk, N_k)
-#        print(f"kappa values for bundle {b}, cell {n_cell}: {kappa[:, i]}")
+#        logger.debug(f"kappa values for bundle {b}, cell {n_cell}: {kappa[:, i]}")
 
     # Create the bundle dictionary
     bundle = {
@@ -768,7 +762,7 @@ def set_bundle_111(BZ, w, l, b, k_segment, k_structure):
     }
 
     end_time = time.time()
-    print("set_bundle_111 executed in {:.6f} seconds".format(end_time - start_time))
+    logger.debug("set_bundle_111 executed in {:.6f} seconds".format(end_time - start_time))
 
     return bundle
 
@@ -785,7 +779,7 @@ def get_masks(direction, dir_index):
     tuple: mask_1, mask_2 (numpy.ndarray) representing the conversion masks.
     """
     start_time = time.time()
-    print(f"Calculating masks for direction: {direction}, dir_index: {dir_index}")
+    logger.debug(f"Calculating masks for direction: {direction}, dir_index: {dir_index}")
 
     mask_1, mask_2 = np.array([0, 1, 0]), np.array([0, 0, 1])  # Default masks for (100) direction
 
@@ -814,7 +808,7 @@ def get_masks(direction, dir_index):
         mask_2 = np.array([-1 / np.sqrt(6), -1 / np.sqrt(6), 2 / np.sqrt(6)])
 
     end_time = time.time()
-    print("get_masks executed in {:.6f} seconds".format(end_time - start_time))
+    logger.debug("get_masks executed in {:.6f} seconds".format(end_time - start_time))
 
     return mask_1, mask_2
 
@@ -831,7 +825,7 @@ def closest(x):
     start_time = time.time()
     result = int(np.round(x))  # Use numpy for efficient rounding
     end_time = time.time()
-    print("closest executed in {:.6f} seconds".format(end_time - start_time))
+    logger.debug("closest executed in {:.6f} seconds".format(end_time - start_time))
     return result
 
 
@@ -849,7 +843,7 @@ def find_closest_index(r_range, r):
     start_time = time.time()
     closest_index = int(np.argmin(np.abs(r_range - r)))  # Use numpy for efficient array operations
     end_time = time.time()
-    print("find_closest_index executed in {:.6f} seconds".format(end_time - start_time))
+    logger.debug("find_closest_index executed in {:.6f} seconds".format(end_time - start_time))
     return closest_index
 
 def organize_output_path(k_path, k_path_points):
@@ -867,7 +861,7 @@ def organize_output_path(k_path, k_path_points):
     """
     
     start_time = time.time()
-    print("Starting organize_output_path function...")
+    logger.debug("Starting organize_output_path function...")
     
     N_segment = len(k_path_points) - 1  # Number of segments
     kappa = [0]                         # Initialize kappa array with the starting point
@@ -898,8 +892,8 @@ def organize_output_path(k_path, k_path_points):
     
     # Timing and completion message
     end_time = time.time()
-    print(f"organize_output_path completed in {end_time - start_time:.4f} seconds")
-    print(f"Generated kappa path with {len(kappa)} points and {len(kappa_ticks)} tick marks.")
+    logger.debug(f"organize_output_path completed in {end_time - start_time:.4f} seconds")
+    logger.debug(f"Generated kappa path with {len(kappa)} points and {len(kappa_ticks)} tick marks.")
 
     return kappa, kappa_ticks
 
@@ -916,7 +910,7 @@ def organize_output_phi(k_path):
     """
 
     start_time = time.time()
-    print("Starting organize_output_phi function...")
+    logger.debug("Starting organize_output_phi function...")
 
     N_segment = len(k_path)  # Number of segments
     phi_folded = []  # Using a list for efficient concatenation
@@ -935,8 +929,8 @@ def organize_output_phi(k_path):
 
     # Timing and completion message
     end_time = time.time()
-    print(f"organize_output_phi completed in {end_time - start_time:.4f} seconds")
-    print(f"Generated phi_folded array with {len(phi_folded)} elements.")
+    logger.debug(f"organize_output_phi completed in {end_time - start_time:.4f} seconds")
+    logger.debug(f"Generated phi_folded array with {len(phi_folded)} elements.")
 
     return phi_folded
 
@@ -975,7 +969,7 @@ def clip_cube(psi, atom_pos, frame, dx):
     """
     
     start_time = time.time()
-    print("Starting clip_cube function...")
+    logger.debug("Starting clip_cube function...")
 
     # Convert atomic positions to numpy array for easier slicing
     atom_pos_array = np.array(atom_pos)
@@ -997,19 +991,18 @@ def clip_cube(psi, atom_pos, frame, dx):
 
     # Timing and completion message
     end_time = time.time()
-    print(f"clip_cube completed in {end_time - start_time:.4f} seconds")
-    print(f"Clipped psi to shape {psi_clipped.shape} with bounds in each dimension adjusted by frame.")
+    logger.debug(f"clip_cube completed in {end_time - start_time:.4f} seconds")
+    logger.debug(f"Clipped psi to shape {psi_clipped.shape} with bounds in each dimension adjusted by frame.")
 
     return psi_clipped
 
-def bse_cube(file_specifiers, log_file, k_path, kappa_path, data):
+def bse_cube(file_specifiers, k_path, kappa_path, data):
     """
     Processes multiple cube files, applies BSE analysis, and returns folded states and processed states.
     
     Parameters:
     - file_specifiers: dict, contains information about file naming and configuration.
       Required keys: 'N_cube', 'cube_0', 'Project', 'State', 'WFN', 'Addition', 'extension'.
-    - log_file: file-like object or path, used to log processing information.
     - k_path: array-like, path through reciprocal space for BSE analysis.
     - kappa_path: array-like, wavenumber data for processing.
     - data: dict, configuration parameters (e.g., frame width, clip flag).
@@ -1022,7 +1015,7 @@ def bse_cube(file_specifiers, log_file, k_path, kappa_path, data):
     """
     
     start_time = time.time()
-    print("Starting bse_cube function...")
+    logger.info("Starting bse_cube function...")
     
     no_error = True
     files_processed = False
@@ -1037,19 +1030,19 @@ def bse_cube(file_specifiers, log_file, k_path, kappa_path, data):
     
     for cube in range(N_cube):
         cube_i = cube_0 + cube
-        log_output(f"state {cube_i} started", log_file)
+        logger.info(f"state {cube_i} started")
         
         file_name = (
             f"{file_specifiers['Project']}{file_specifiers['WFN']}"
             f"{cube_i}{file_specifiers['Addition']}.{file_specifiers['extension'][0]}"
         )
-        log_output(f"try open {file_name}", log_file)
+        logger.info(f"try open {file_name}")
         
         # Attempt to read the cube file
         psi, meta, atom_Z, atom_pos, no_error = read_cube(file_name)
         
         if no_error:
-            log_output("cube file loaded", log_file)
+            logger.info("cube file loaded")
             data['dx'] = meta['xvec'][0]
             
             # Apply clipping if specified
@@ -1057,13 +1050,13 @@ def bse_cube(file_specifiers, log_file, k_path, kappa_path, data):
                 psi = clip_cube(psi, atom_pos, frame, data['dx'])
             
             # Perform BSE analysis and append results
-            phi_folded_path = bse(psi, k_path, data, log_file)
+            phi_folded_path = bse(psi, k_path, data)
             bse_folded_states.append(phi_folded_path)
             state_nr.append(cube_i)
-            log_output(f"state {cube_i} analyzed", log_file)
+            logger.info(f"state {cube_i} analyzed")
             files_processed = True
         else:
-            log_output(f"ERROR - state {cube_i}, analysis skipped", log_file)
+            logger.info(f"ERROR - state {cube_i}, analysis skipped")
             continue
 
     # Convert lists to numpy arrays if files were processed
@@ -1076,19 +1069,18 @@ def bse_cube(file_specifiers, log_file, k_path, kappa_path, data):
 
     # Timing and completion message
     end_time = time.time()
-    print(f"bse_cube completed in {end_time - start_time:.4f} seconds")
-    print(f"Processed {len(state_nr)} cube files successfully.")
+    logger.info(f"bse_cube completed in {end_time - start_time:.4f} seconds")
+    logger.info(f"Processed {len(state_nr)} cube files successfully.")
 
     return bse_folded_states, state_nr, files_processed
 
-def bse_h5(file_specifiers, log_file, k_path, kappa_path, data):
+def bse_h5(file_specifiers, k_path, kappa_path, data):
     """
     Processes an HDF5 file containing multiple states, applies BSE analysis, and returns folded states and state numbers.
     
     Parameters:
     - file_specifiers: dict, contains information about file naming and configuration.
       Required keys: 'cube_0', 'h5_file', 'extension'.
-    - log_file: file-like object or path, used to log processing information.
     - k_path: array-like, path through reciprocal space for BSE analysis.
     - kappa_path: array-like, wavenumber data for processing.
     - data: dict, configuration parameters (e.g., frame width, clip flag).
@@ -1101,7 +1093,7 @@ def bse_h5(file_specifiers, log_file, k_path, kappa_path, data):
     """
     
     start_time = time.time()
-    print("Starting bse_h5 function...")
+    logger.info("Starting bse_h5 function...")
 
     no_error = True
     files_processed = False
@@ -1115,20 +1107,20 @@ def bse_h5(file_specifiers, log_file, k_path, kappa_path, data):
     h5_file = f"{file_specifiers['h5_file']}.{file_specifiers['extension'][1]}"
     
     # Attempt to load the HDF5 file
-    log_output(f"search for {h5_file}", log_file)
+    logger.info(f"search for {h5_file}")
     try:
         with h5py.File(h5_file, 'r') as h5:
             psi_all = h5['psi_r'][:]
             atom_pos = h5['atoms'][:]
             dr = h5['grid_spacing'][:]
-            print(f"Grid spacing (dr): {dr}")
+            logger.debug(f"Grid spacing (dr): {dr}")
             data['dx'] = dr[0]
     except FileNotFoundError:
         no_error = False
-        log_output(f"{h5_file} not found", log_file)
+        logger.info(f"{h5_file} not found")
     
     if no_error:
-        log_output("h5 file loaded", log_file)
+        logger.info("h5 file loaded")
         N_states = psi_all.shape[0]  # Number of states in the file
         
         # Process each state in the HDF5 file
@@ -1140,13 +1132,13 @@ def bse_h5(file_specifiers, log_file, k_path, kappa_path, data):
                 psi = clip_cube(psi, atom_pos, frame, data['dx'])
             
             # Perform BSE analysis and store results
-            phi_folded_path = bse(psi, k_path, data, log_file)
+            phi_folded_path = bse(psi, k_path, data)
             bse_folded_states.append(phi_folded_path)
             state_nr.append(state + state_0)
-            log_output(f"state {state} analyzed", log_file)
+            logger.info(f"state {state} analyzed")
             files_processed = True
     else:
-        log_output("ERROR - BSE analysis stopped", log_file)
+        logger.info("ERROR - BSE analysis stopped")
     
     # Convert lists to numpy arrays if any states were processed
     if files_processed:
@@ -1158,8 +1150,8 @@ def bse_h5(file_specifiers, log_file, k_path, kappa_path, data):
 
     # Timing and completion message
     end_time = time.time()
-    print(f"bse_h5 completed in {end_time - start_time:.4f} seconds")
-    print(f"Processed {len(state_nr)} states successfully.")
+    logger.info(f"bse_h5 completed in {end_time - start_time:.4f} seconds")
+    logger.info(f"Processed {len(state_nr)} states successfully.")
 
     return bse_folded_states, state_nr, files_processed
 
@@ -1218,7 +1210,7 @@ def process_bundle_chunk_111(chunk, k_segment, k_structure, psi_rot, r_par, r_pe
         phi_folded_chunk += np.sum(abs(phi_projection_unfolded) ** 2, axis=(1, 2))
     return phi_folded_chunk
 
-def bse(psi, k_path, data, log_file):
+def bse(psi, k_path, data):
     """
     Performs Band Structure Expansion (BSE) analysis on a wavefunction along a pre-defined k-path.
 
@@ -1232,7 +1224,7 @@ def bse(psi, k_path, data, log_file):
     """
 
     start_time = time.time()
-    log_output("Starting BSE analysis...", log_file)
+    logger.info("Starting BSE analysis...")
 
     # Get calculation data
     a = data['latt_par']
@@ -1249,9 +1241,9 @@ def bse(psi, k_path, data, log_file):
     n_cores = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
     os.environ["OMP_NUM_THREADS"] = str(n_cores)
 
-    log_output(f"Number of CPUs : {n_cores}", log_file)
+    logger.info(f"Number of CPUs : {n_cores}")
     chunk_multiplier = 1  # Adjusted to prevent excessive parallel overhead when cores are large
-    log_output(f"Chunk multiplier : {chunk_multiplier}", log_file)
+    logger.info(f"Chunk multiplier : {chunk_multiplier}")
 
     # Expansion for the 100 segments
     for segment in range(n_100):
@@ -1264,11 +1256,11 @@ def bse(psi, k_path, data, log_file):
 
         # Calculate the number of tensordot operations for the 100 segment
         num_tensordot_operations = bundles
-        log_output(f"Segment {segment} (100) - Number of tensordot operations: {num_tensordot_operations}", log_file)
+        logger.info(f"Segment {segment} (100) - Number of tensordot operations: {num_tensordot_operations}")
 
         # Determine cores to use based on the number of operations
         cores_to_use = min(n_cores, num_tensordot_operations)
-        log_output(f"Segment {segment} (100) - Using {cores_to_use} cores", log_file)
+        logger.info(f"Segment {segment} (100) - Using {cores_to_use} cores")
 
         chunk_size = max(1, num_tensordot_operations // cores_to_use)
         chunked_bundles = list(chunked_iterable(range(bundles), chunk_size))
@@ -1290,8 +1282,8 @@ def bse(psi, k_path, data, log_file):
                     [b], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
                 )
 
-        log_output(f"Segment {segment} (100) processed in {time.time() - segment_start:.4f} seconds", log_file)
-    log_output(f"{n_100} 100 segments processed", log_file)
+        logger.info(f"Segment {segment} (100) processed in {time.time() - segment_start:.4f} seconds")
+    logger.info(f"{n_100} 100 segments processed")
 
     # Expansion for the 110 segments
     for segment in range(n_110):
@@ -1305,11 +1297,11 @@ def bse(psi, k_path, data, log_file):
         # Calculate total tensordot operations for the 110 segment
         tensordot_operations = [(b, l) for b in range(bundles) for l in range(2 * Nyq + 1 - b)]
         num_tensordot_operations = len(tensordot_operations)
-        log_output(f"Segment {segment} (110) - Number of tensordot operations: {num_tensordot_operations}", log_file)
+        logger.info(f"Segment {segment} (110) - Number of tensordot operations: {num_tensordot_operations}")
 
         # Determine cores to use based on the number of operations
         cores_to_use = min(n_cores, num_tensordot_operations)
-        log_output(f"Segment {segment} (110) - Using {cores_to_use} cores", log_file)
+        logger.info(f"Segment {segment} (110) - Using {cores_to_use} cores")
 
         chunk_size = max(1, num_tensordot_operations // cores_to_use)
         chunked_operations = [tensordot_operations[i:i + chunk_size] for i in range(0, num_tensordot_operations, chunk_size)]
@@ -1332,8 +1324,8 @@ def bse(psi, k_path, data, log_file):
                     [(b, l)], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq
                 )
 
-        log_output(f"Segment {segment} (110) processed in {time.time() - segment_start:.4f} seconds", log_file)
-    log_output(f"{n_110} 110 segments processed", log_file)
+        logger.info(f"Segment {segment} (110) processed in {time.time() - segment_start:.4f} seconds")
+    logger.info(f"{n_110} 110 segments processed")
 
     # Expansion for the 111 segments
     for segment in range(n_111):
@@ -1351,11 +1343,11 @@ def bse(psi, k_path, data, log_file):
             for l in range(w + 1)
         ]
         num_tensordot_operations = len(bundle_width_layer_combinations)
-        log_output(f"Segment {segment} (111) - Number of tensordot operations: {num_tensordot_operations}", log_file)
+        logger.info(f"Segment {segment} (111) - Number of tensordot operations: {num_tensordot_operations}")
 
         # Determine cores to use based on the number of operations
         cores_to_use = min(n_cores, num_tensordot_operations)
-        log_output(f"Segment {segment} (111) - Using {cores_to_use} cores", log_file)
+        logger.info(f"Segment {segment} (111) - Using {cores_to_use} cores")
 
         chunk_size = max(1, num_tensordot_operations // cores_to_use)
         chunked_combinations = [bundle_width_layer_combinations[i:i + chunk_size]
@@ -1373,13 +1365,13 @@ def bse(psi, k_path, data, log_file):
         for phi_folded in results:
             k_segment['phi_folded'] += phi_folded
 
-        log_output(f"Segment {segment} (111) processed in {time.time() - segment_start:.4f} seconds", log_file)
-    log_output(f"{n_111} 111 segments processed", log_file)
+        logger.info(f"Segment {segment} (111) processed in {time.time() - segment_start:.4f} seconds")
+    logger.info(f"{n_111} 111 segments processed")
 
     # Organize and transfer the results to a single 1D array
-    log_output("Organizing folded path results...", log_file)
+    logger.info("Organizing folded path results...")
     phi_folded_path = organize_output_phi(k_path)
-    log_output(f"BSE analysis completed in {time.time() - start_time:.4f} seconds.", log_file)
+    logger.info(f"BSE analysis completed in {time.time() - start_time:.4f} seconds.")
 
     return phi_folded_path
 
@@ -1399,12 +1391,12 @@ def write_path(project, k_path_names, kappa_ticks, kappa):
 
     start_time = time.time()
     fname = f"{project}_bse_k_path.pkl"
-    print(f"Writing k-path to file: {fname}")
+    logger.debug(f"Writing k-path to file: {fname}")
 
     with open(fname, "wb") as f:
         pickle.dump((k_path_names, kappa_ticks, kappa), f)
 
-    print(f"k-path data written to {fname} in {time.time() - start_time:.4f} seconds")
+    logger.info(f"k-path data written to {fname} in {time.time() - start_time:.4f} seconds")
 
 def write_bse_folded(project, state_nr, bse_folded_states):
     """
@@ -1424,12 +1416,12 @@ def write_bse_folded(project, state_nr, bse_folded_states):
     N_i = state_nr[0]
     N_f = state_nr[-1]
     fname = f"{project}_bse_States_{int(N_i)}_{int(N_f)}.pkl"
-    print(f"Writing BSE folded states to file: {fname}")
+    logger.info(f"Writing BSE folded states to file: {fname}")
     
     with open(fname, "wb") as f:
         pickle.dump((state_nr, bse_folded_states), f)
 
-    print(f"BSE folded states written to {fname} in {time.time() - start_time:.4f} seconds")
+    logger.info(f"BSE folded states written to {fname} in {time.time() - start_time:.4f} seconds")
 
 #%% Data structures
 

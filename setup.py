@@ -9,7 +9,7 @@ setup(
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
     url='https://github.com/nlesc-nano/fuzzyqd',  # Replace with your GitHub URL
-    py_modules=['fuzzyqd', 'funcs'],  # Specify your module names here
+    py_modules=['fuzzyqd', 'funcs', 'logger_config'],  # Specify your module names here
     package_dir={'': 'src'},  # Maps the module root to src
     entry_points={
         'console_scripts': [

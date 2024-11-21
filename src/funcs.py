@@ -1040,7 +1040,7 @@ def bse_cube(file_specifiers, log_file, k_path, kappa_path, data):
         log_output(f"state {cube_i} started", log_file)
         
         file_name = (
-            f"{file_specifiers['Project']}_{file_specifiers['State']}{file_specifiers['WFN']}"
+            f"{file_specifiers['Project']}{file_specifiers['WFN']}"
             f"{cube_i}{file_specifiers['Addition']}.{file_specifiers['extension'][0]}"
         )
         log_output(f"try open {file_name}", log_file)

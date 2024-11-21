@@ -158,12 +158,22 @@ def perform_bse_calculations(params):
         'extension': ['cube', 'h5', 'txt']
     }
 
+    # Default settings, but can be overwritten in YAML
+    re_run = params['settings'].get('re_run', False)
+    np_array_dump = params['settings'].get('np_array_dump', True)
+    h5_output = params['settings'].get('h5_output', False)
+    E_binning = params['settings'].get('E_binning', False)
+    fcc = params['settings']['fcc']
+    plot = params['settings'].get('plot', False)
+    cube_input = params['settings']['cube_input']
+    h5_input = not cube_input
+
     # If 'block_index' exists in params['files'], include it in the log file name
     block_index = params['files'].get('block_index', None)
     if block_index is not None:
-        log_file = f"{file_specifiers['Project']}_{file_specifiers['State']}_{block_index}.log"
+        log_file = f"{file_specifiers['Project']}_{block_index}.log"
     else:
-        log_file = f"{file_specifiers['Project']}_{file_specifiers['State']}.log"
+        log_file = f"{file_specifiers['Project']}.log"
 
     k_path, kappa_path = [], []
 
@@ -185,7 +195,7 @@ def perform_bse_calculations(params):
     # Post-processing
     project = file_specifiers['Project']
     if files_processed:
-        if not params['settings']['re_run']:
+        if not re_run:  # Use the pre-defined re_run variable
             bse.write_path(project, k_path_names, kappa_ticks, kappa_path)
         bse.write_bse_folded(project, state_nr, bse_folded_states)
         bse.log_output("Bloch state expansion saved as NumPy array", log_file)

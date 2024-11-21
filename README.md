@@ -186,15 +186,29 @@ fuzzyqd input_parameters.yaml
 
 ### **7. Merge Results**
 Once the cube files in each block folder are processed, two `.pkl` files will be generated in each folder. To merge these results:
+
 1. Create a new folder (e.g., `process_pickles`):
    ```bash
    mkdir process_pickles
    cd process_pickles
    ```
-2. Run the following command to process the pickles and generate a combined HDF5 file:
+
+2. Copy all `.pkl` files from each block folder into the `process_pickles` folder:
+   ```bash
+   cp ../block_folder_*/GaAs_*.pkl .
+   ```
+
+3. Additionally, copy all `*.pdos` files generated in the original Cp2k calculations into the `process_pickles` folder:
+   ```bash
+   cp ../path_to_cp2k_calculations/*.pdos .
+   ```
+
+4. Run the following command to process the pickles and the `*.pdos` files, and generate a combined HDF5 file:
    ```bash
    process_pickles.py --bse --folder . --project GaAs
    ```
+
+This will generate a combined HDF5 file containing the processed results and the relevant PDOS information.
 
 ---
 

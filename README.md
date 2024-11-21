@@ -1,11 +1,12 @@
 
 # FuzzyQD
 
-**FuzzyQD** is a Python package for Bloch state expansion and quantum dot fuzzy band structures. It facilitates the analysis and computation of band structures in quantum dots, enabling efficient and structured workflows for scientific research.
+**FuzzyQD** is a Python package designed for Bloch state expansion and the computation of fuzzy band structures in quantum dots. It streamlines the analysis and calculation of band structures, leveraging Density Functional Theory (DFT) as implemented in the CP2k software package
 
 ## Features
 
 - **Bloch State Expansion (BSE)**: Analyze and expand Bloch states for quantum dots.
+- **Fuzzy Band Structures**: Generate band structure for finite nanoclusters such as quantum dots
 - **Flexible Input Handling**: Supports cube and HDF5 files for input.
 - **Parallel Processing**: Includes support for multi-node batch processing using SLURM scripts.
 - **Customizable Settings**: Configure lattice parameters, reciprocal space details, and clipping options through an easy-to-use YAML configuration file.

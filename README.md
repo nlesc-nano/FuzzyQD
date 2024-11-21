@@ -23,9 +23,22 @@ FuzzyQD requires Python 3.8 or higher and the following dependencies:
 
 ## Installation
 
-You can install the FuzzyQD package directly from the source:
+To ensure a clean and controlled environment, it is recommended to use a Conda environment with at least Python 3.8 before installing **FuzzyQD**.
+
+### Create a Conda Environment
+
+1. Create a new Conda environment with Python 3.8 (or later):
+   ```bash
+   conda create -n fuzzyqd_env python=3.8 -y
+   ```
+2. Activate the environment:
+   ```bash
+   conda activate fuzzyqd_env
+   ```
 
 ### Clone the Repository
+
+Clone the repository from GitHub:
 
 ```bash
 git clone https://github.com/nlesc-nano/fuzzyqd.git
@@ -45,16 +58,6 @@ For development purposes, you can install it in editable mode:
 ```bash
 pip install -e .
 ```
-
-### Verify the Installation
-
-Run the following command to verify the installation:
-
-```bash
-fuzzyqd --help
-```
-
-If the installation was successful, this will display the usage information for the `fuzzyqd` command.
 
 ## Usage
 

@@ -227,6 +227,9 @@ To visualize the fuzzy band structure:
    plot_fuzzyqd.py --hdf5 nameoffile.h5 --energy_window -3.0 3.0
    ```
 
+<img width="820" alt="Screenshot 2024-11-21 at 16 51 31" src="https://github.com/user-attachments/assets/57c50be9-6eee-4a22-b767-c93766502ec7">
+
+
 ---
 
 ### Notes

@@ -8,9 +8,6 @@ clipping:
 reciprocal_space:
   dk: 0.005  # Reciprocal space resolution in units 2 * pi / a (optional, default is 0.005)
 
-energy_binning:
-  dE: 0.0125  # Energy binning resolution in eV (explicitly set by user)
-
 k_path:
   names: ['L', 'G', 'Xx', 'W', 'K', 'G', 'Xy']  # Names of k-path points
   points:

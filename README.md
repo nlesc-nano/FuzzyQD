@@ -5,7 +5,7 @@
 
 ## Features
 
-- **Bloch State Expansion (BSE)**: Analyze and expand Bloch states for quantum dots.
+- **Bloch State (Orbital) Expansion (BSE)**: Analyze and expand Bloch states (orbitals) for quantum dots.
 - **Fuzzy Band Structures**: Generate band structure for finite nanoclusters such as quantum dots
 - **Flexible Input Handling**: Supports cube and HDF5 files for input.
 - **Parallel Processing**: Includes support for multi-node batch processing using SLURM scripts.
@@ -126,8 +126,6 @@ Follow these instructions to use the **FuzzyQD** package effectively:
      clip: false
    reciprocal_space:
      dk: 0.005
-   energy_binning:
-     dE: 0.0125
    files:
      folder_cubes: ./cubes
      Project: GaAs
@@ -148,6 +146,8 @@ Follow these instructions to use the **FuzzyQD** package effectively:
        - [0.0, 0.0, 0.0]
        - [0.0, 0.5, 0.0]
    ```
+
+In principle, for a given system one should define the lattice constant, possibly retrieved by  
 
 ---
 

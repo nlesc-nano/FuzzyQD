@@ -5,7 +5,9 @@ import pickle
 import h5py
 import math
 import matplotlib.pyplot as plt
+import torch
 from scipy.ndimage import rotate
+from scipy.ndimage import map_coordinates
 from itertools import permutations
 from joblib import Parallel, delayed
 from logger_config import logger
@@ -318,37 +320,230 @@ def summary_k_path(k_path, segments, a_dx):
 
     return k_structure
 
-def rotate_psi(psi, k_segment):
+
+
+def precompute_rotation_grid(shape, angle, axes):
     """
-    Orient the wavefunction in line with the specified direction.
-    The reorientation creates a cubic grid aligned with the segment axis. For (100), re-orientation is avoided
-    through a re-assignment of the axes. This function fills in the parallel and perpendicular coordinates
-    in line with the wavefunctions.
-    
+    Precompute the grid for rotating a 3D array.
+
     Parameters:
-    psi (numpy.ndarray): A 3D array representing the wavefunction.
+    shape (tuple): Shape of the input 3D array (depth, height, width).
+    angle (float): Rotation angle in degrees.
+    axes (tuple): Axes to rotate around (e.g., (0, 1) for z-axis rotation).
+
+    Returns:
+    np.ndarray: Precomputed transformation grid with shape (3, depth, height, width).
+    """
+    angle_rad = np.radians(angle)
+    cos_theta = np.cos(angle_rad)
+    sin_theta = np.sin(angle_rad)
+
+    # Define the rotation matrix
+    if axes == (0, 1):  # Rotation around the z-axis
+        rotation_matrix = np.array([
+            [cos_theta, -sin_theta, 0],
+            [sin_theta, cos_theta, 0],
+            [0, 0, 1]
+        ])
+    elif axes == (0, 2):  # Rotation around the y-axis
+        rotation_matrix = np.array([
+            [cos_theta, 0, -sin_theta],
+            [0, 1, 0],
+            [sin_theta, 0, cos_theta]
+        ])
+    elif axes == (1, 2):  # Rotation around the x-axis
+        rotation_matrix = np.array([
+            [1, 0, 0],
+            [0, cos_theta, -sin_theta],
+            [0, sin_theta, cos_theta]
+        ])
+    else:
+        raise ValueError(f"Unsupported axes: {axes}")
+
+    # Create a grid of coordinates for the 3D array
+    coords = np.meshgrid(
+        np.arange(shape[0]),
+        np.arange(shape[1]),
+        np.arange(shape[2]),
+        indexing='ij'  # Cartesian indexing
+    )
+    coords = np.stack(coords, axis=0).reshape(3, -1)  # Shape (3, num_points)
+
+    # Subtract the center to rotate around the array's center
+    center = np.array([(s - 1) / 2 for s in shape])
+    coords_centered = coords - center[:, None]  # Shape (3, num_points)
+
+    # Apply the rotation matrix
+    rotated_coords = np.dot(rotation_matrix, coords_centered) + center[:, None]
+
+    # Reshape back to 3D grid with an additional axis for each coordinate
+    return rotated_coords.reshape(3, *shape)
+
+
+def apply_precomputed_grid(data, grid):
+    """
+    Apply a precomputed rotation grid to a 3D array.
+
+    Parameters:
+    data (np.ndarray): Input 3D array.
+    grid (np.ndarray): Precomputed transformation grid.
+
+    Returns:
+    np.ndarray: Rotated 3D array.
+    """
+    # Extract the rotated coordinates for each axis
+    coords = [grid[i] for i in range(3)]
+
+    # Interpolate the data at the new coordinates
+    rotated = map_coordinates(data, coords, order=3, mode='constant', cval=0)
+    return rotated
+
+def precompute_torch_rotation_grid(shape, angle, axes, device='cpu'):
+    """
+    Precompute the rotation grid for a 3D array using PyTorch.
+
+    Parameters:
+    shape (tuple): Shape of the input 3D array (depth, height, width).
+    angle (float): Rotation angle in degrees.
+    axes (tuple): Axes to rotate around (e.g., (0, 1) for z-axis rotation).
+    device (str): Device to perform computations ('cpu' or 'cuda').
+
+    Returns:
+    torch.Tensor: A 5D grid tensor for grid_sample with shape (1, depth, height, width, 3).
+    """
+    dtype = torch.float32  # Explicitly define the data type
+
+    # Convert angle to radians
+    angle_rad = torch.tensor(angle * np.pi / 180.0, device=device, dtype=dtype)
+    cos_theta = torch.cos(angle_rad)
+    sin_theta = torch.sin(angle_rad)
+
+    # Define the rotation matrix
+    if axes == (0, 1):  # Rotation around the z-axis
+        rotation_matrix = torch.tensor([
+            [cos_theta, -sin_theta, 0],
+            [sin_theta, cos_theta, 0],
+            [0, 0, 1]
+        ], device=device, dtype=dtype)
+    elif axes == (0, 2):  # Rotation around the y-axis
+        rotation_matrix = torch.tensor([
+            [cos_theta, 0, -sin_theta],
+            [0, 1, 0],
+            [sin_theta, 0, cos_theta]
+        ], device=device, dtype=dtype)
+    elif axes == (1, 2):  # Rotation around the x-axis
+        rotation_matrix = torch.tensor([
+            [1, 0, 0],
+            [0, cos_theta, -sin_theta],
+            [0, sin_theta, cos_theta]
+        ], device=device, dtype=dtype)
+    else:
+        raise ValueError(f"Unsupported axes: {axes}")
+
+    # Create a grid of normalized coordinates
+    z, y, x = torch.meshgrid(
+        torch.linspace(-1, 1, shape[0], device=device, dtype=dtype),
+        torch.linspace(-1, 1, shape[1], device=device, dtype=dtype),
+        torch.linspace(-1, 1, shape[2], device=device, dtype=dtype),
+        indexing='ij'
+    )
+    coords = torch.stack([z, y, x], dim=-1)  # Shape: (depth, height, width, 3)
+
+    # Apply the rotation
+    rotated_coords = torch.einsum('ij,xyzj->xyzi', rotation_matrix, coords)
+
+    # Reshape for grid_sample (5D: (1, depth, height, width, 3))
+    return rotated_coords.unsqueeze(0)
+
+def rotate_torch(tensor, angle, axes, device="cpu"):
+    """
+    Rotate a 3D PyTorch tensor using bilinear interpolation.
+
+    Parameters:
+    tensor (torch.Tensor): A 3D tensor to rotate.
+    angle (float): The angle of rotation in degrees.
+    axes (tuple): The two axes to rotate around.
+    device (str): The device to perform the operation on ('cpu' or 'cuda').
+
+    Returns:
+    torch.Tensor: Rotated tensor.
+    """
+    # Convert angle to radians
+    angle_rad = torch.tensor(angle, device=device, dtype=torch.float32) * torch.pi / 180
+
+    # Create rotation matrix
+    cos_theta = torch.cos(angle_rad)
+    sin_theta = torch.sin(angle_rad)
+    rotation_matrix = torch.eye(3, device=device, dtype=torch.float32)
+    i, j = axes
+    rotation_matrix[i, i] = cos_theta
+    rotation_matrix[i, j] = -sin_theta
+    rotation_matrix[j, i] = sin_theta
+    rotation_matrix[j, j] = cos_theta
+
+    # Get grid for interpolation
+    shape = tensor.shape
+    coords = torch.meshgrid(
+        [torch.arange(s, dtype=torch.float32, device=device) for s in shape], indexing="ij"
+    )
+    coords = torch.stack(coords, dim=-1)
+    coords = coords.reshape(-1, 3)
+
+    # Rotate coordinates
+    rotated_coords = torch.matmul(coords, rotation_matrix.T)
+    rotated_coords = rotated_coords.reshape(*shape, 3)
+
+    # Normalize coordinates to [-1, 1] for grid_sample
+    grid = 2.0 * rotated_coords / (torch.tensor(shape, device=device, dtype=torch.float32) - 1) - 1
+    grid = grid[..., [2, 1, 0]]  # PyTorch expects [z, y, x]
+
+    # Perform grid sampling
+    rotated = torch.nn.functional.grid_sample(
+        tensor.unsqueeze(0).unsqueeze(0),
+        grid.unsqueeze(0),
+        mode="bilinear",
+        align_corners=True,
+    )
+
+    return rotated.squeeze()
+
+def rotate_psi(psi, k_segment, use_torch, device, torch_tensordot_only):
+    """
+    Orient the wavefunction in line with the specified direction, with the option to use PyTorch or NumPy.
+
+    Parameters:
+    psi (numpy.ndarray or torch.Tensor): A 3D array representing the wavefunction.
     k_segment (dict): A dictionary containing information about the segment, including direction and rotation angles.
+    use_torch (bool): If True, use PyTorch for rotation; otherwise, use NumPy.
+    device (str): Device to use for PyTorch computations ('cpu' or 'cuda').
+    torch_tensordot_only (bool): If True, rotation is done using NumPy and only tensordot uses PyTorch.
 
     Returns:
     tuple: A tuple containing the following:
-        - psi_rot (numpy.ndarray): The rotated wavefunction.
-        - r_par (numpy.ndarray): The parallel coordinates.
-        - r_perp_0 (numpy.ndarray): The first set of perpendicular coordinates.
-        - r_perp_1 (numpy.ndarray): The second set of perpendicular coordinates.
+        - psi_rot (numpy.ndarray or torch.Tensor): The rotated wavefunction.
+        - r_par (torch.Tensor): The parallel coordinates.
+        - r_perp_0 (torch.Tensor): The first set of perpendicular coordinates.
+        - r_perp_1 (torch.Tensor): The second set of perpendicular coordinates.
         - axis_id (numpy.ndarray): The axis assignment.
     """
     start_time = time.time()
 
+    if not use_torch and not torch_tensordot_only:
+       logger.info("'torch_tensordot_only=False' is incompatible with 'use_torch=False'. Automatically setting 'torch_tensordot_only=True'.")
+       torch_tensordot_only = True   
+
     # Set initial values for rotated wavefunction and real space coordinates
-    psi_rot = psi.copy()
+    psi_rot = psi.copy() if isinstance(psi, np.ndarray) else psi.detach().cpu().numpy()
     N = psi.shape[0]
-    r_par = r_perp_0 = r_perp_1 = np.linspace(0, N - 1, N)
+    r_par = np.linspace(0, N - 1, N)
+    r_perp_0 = np.linspace(0, N - 1, N)
+    r_perp_1 = np.linspace(0, N - 1, N)
     axis_id = np.array([0, 1, 2], dtype=int)
-    
+
     dir_k = k_segment['dir_k']
     direction = k_segment['dir']
 
-    logger.debug("Initial axis assignment:", axis_id)
+    logger.debug("Initial axis assignment: {axis_id}")
 
     # Axis assignment for (100) segments
     if direction == 0:
@@ -356,25 +551,43 @@ def rotate_psi(psi, k_segment):
             axis_id = np.array([1, 0, 2], dtype=int)
         elif abs(dir_k[2]) > 0.999999:
             axis_id = np.array([2, 1, 0], dtype=int)
-        logger.debug("Updated axis assignment for (100):", axis_id)
+
+        # Convert to PyTorch tensors if needed for tensordot operations
+        if use_torch:
+           psi_rot = torch.tensor(psi_rot, device=device, dtype=torch.float32)
+        logger.debug("Updated axis assignment for (100): , {axis_id}")
+
     # Rotations for (110) segments
     if direction == 1:
         angle_1 = np.degrees(k_segment['rot_angle'][0])
         angle_2 = np.degrees(k_segment['rot_angle'][1])
         logger.debug(f"Rotation angles for (110): angle_1 = {angle_1}, angle_2 = {angle_2}")
 
-        if abs(dir_k[2]) < 1e-6:
-            psi_rot = rotate(psi, angle=angle_1, axes=(0, 1), reshape=True)
-            logger.debug("Rotated wavefunction around y-axis by angle_1.")
-        elif abs(dir_k[1]) < 1e-6:
-            psi_rot = rotate(psi, angle=angle_2, axes=(0, 2), reshape=True)
-            logger.debug("Rotated wavefunction around z-axis by angle_2.")
-        elif abs(dir_k[0]) < 1e-6:
-            psi_i = rotate(psi, angle=angle_1, axes=(0, 1), reshape=True)
-            psi_rot = rotate(psi_i, angle=angle_2, axes=(0, 2), reshape=True)
-            logger.debug("Performed two rotations for (111): first by angle_1, then by angle_2.")
+        if torch_tensordot_only:
+            # Use NumPy for rotation
+            if abs(dir_k[2]) < 1e-6:
+                psi_rot = rotate(psi_rot, angle=angle_1, axes=(0, 1), reshape=True, order=3)
+            elif abs(dir_k[1]) < 1e-6:
+                psi_rot = rotate(psi_rot, angle=angle_2, axes=(0, 2), reshape=True, order=3)
+            elif abs(dir_k[0]) < 1e-6:
+                psi_i = rotate(psi_rot, angle=angle_1, axes=(0, 1), reshape=True, order=3)
+                psi_rot = rotate(psi_i, angle=angle_2, axes=(0, 2), reshape=True, order=3)
+        else:
+            # Use PyTorch for rotation
+            psi_tensor = torch.tensor(psi, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
+            if abs(dir_k[2]) < 1e-6:
+                grid = precompute_torch_rotation_grid(psi.shape, angle_1, axes=(0, 1), device=device)
+                psi_rot = torch.nn.functional.grid_sample(psi_tensor, grid, mode='bilinear', align_corners=True).squeeze()
+            elif abs(dir_k[1]) < 1e-6:
+                grid = precompute_torch_rotation_grid(psi.shape, angle_2, axes=(0, 2), device=device)
+                psi_rot = torch.nn.functional.grid_sample(psi_tensor, grid, mode='bilinear', align_corners=True).squeeze()
+            elif abs(dir_k[0]) < 1e-6:
+                grid_1 = precompute_torch_rotation_grid(psi.shape, angle_1, axes=(0, 1), device=device)
+                grid_2 = precompute_torch_rotation_grid(psi.shape, angle_2, axes=(0, 2), device=device)
+                psi_rot = torch.nn.functional.grid_sample(psi_tensor, grid_1, mode='bilinear', align_corners=True)
+                psi_rot = torch.nn.functional.grid_sample(psi_rot, grid_2, mode='bilinear', align_corners=True).squeeze()
 
-        # Set parallel and perpendicular coordinates
+        # Update real space coordinates
         N_par = psi_rot.shape[0]
         r_par = np.linspace(0, N_par - 1, N_par)
         N_perp_0 = psi_rot.shape[1]
@@ -386,31 +599,43 @@ def rotate_psi(psi, k_segment):
     r_par *= k_segment['r_par_sign']
     logger.debug("Adjusted parallel coordinates with direction sign.")
 
+    # Convert to PyTorch tensors if needed for tensordot operations
+    if use_torch:
+       r_par = torch.tensor(r_par, device=device, dtype=torch.float32)
+       r_perp_0 = torch.tensor(r_perp_0, device=device, dtype=torch.float32)
+       r_perp_1 = torch.tensor(r_perp_1, device=device, dtype=torch.float32)
+       if torch_tensordot_only:
+            psi_rot = torch.tensor(psi_rot, device=device, dtype=torch.float32)
+
     end_time = time.time()
     logger.info(f"rotate_psi executed in {end_time - start_time:.6f} seconds")
 
     return psi_rot, r_par, r_perp_0, r_perp_1, axis_id
 
-def rotate_psi_111(psi, k_segment):
+def rotate_psi_111(psi, k_segment, use_torch, device, torch_tensordot_only):
     """
-    Orient the wavefunction in line with the given (111) direction.
-    The reorientation creates a cubic grid aligned with the segment axis. The function fills in the parallel and
-    perpendicular coordinates in line with the wavefunctions. Orientation of the corresponding wavenumbers
-    is done upon definition of the bundle. For (111), angles are -45 and -35.2 degrees.
+    Orient the wavefunction in line with the given (111) direction, with the option to use PyTorch or NumPy.
 
     Parameters:
-    psi (numpy.ndarray): A 3D array representing the wavefunction.
+    psi (numpy.ndarray or torch.Tensor): A 3D array representing the wavefunction.
     k_segment (dict): A dictionary containing information about the segment, including rotation angles and sign.
+    use_torch (bool): Whether to use PyTorch for rotations.
+    device (str): Device to use for PyTorch computations ('cpu' or 'cuda').
+    torch_tensordot_only (bool): If True, rotation is done using NumPy and only tensordot uses PyTorch.
 
     Returns:
     tuple: A tuple containing the following:
-        - psi_rot (numpy.ndarray): The rotated wavefunction.
-        - r_par (numpy.ndarray): The parallel coordinates.
-        - r_perp_0 (numpy.ndarray): The first set of perpendicular coordinates.
-        - r_perp_1 (numpy.ndarray): The second set of perpendicular coordinates.
+        - psi_rot (numpy.ndarray or torch.Tensor): The rotated wavefunction.
+        - r_par (torch.Tensor): The parallel coordinates.
+        - r_perp_0 (torch.Tensor): The first set of perpendicular coordinates.
+        - r_perp_1 (torch.Tensor): The second set of perpendicular coordinates.
         - axis_id (numpy.ndarray): The axis assignment.
     """
     start_time = time.time()
+
+    if not use_torch and not torch_tensordot_only:
+       logger.info("'torch_tensordot_only=False' is incompatible with 'use_torch=False'. Automatically setting 'torch_tensordot_only=True'.")
+       torch_tensordot_only = True   
 
     # Extract rotation angles and sign
     angle = k_segment['rot_angle']
@@ -418,33 +643,46 @@ def rotate_psi_111(psi, k_segment):
     sign = k_segment['r_par_sign']
     logger.debug(f"Rotation angles: angle_1 = {angle_1}, angle_2 = {angle_2}, sign = {sign}")
 
-    # Perform the first rotation
-    psi_i = rotate(psi, angle=sign * angle_1, axes=(0, 1), reshape=True)
-    logger.debug(f"Rotated wavefunction around z-axis by angle_1 ({sign * angle_1} degrees).")
+    if torch_tensordot_only:
+        psi_i = rotate(psi, angle=sign * angle_1, axes=(0, 1), reshape=True, order=3)
+        logger.debug(f"Rotated wavefunction around z-axis by angle_1 ({sign * angle_1} degrees).")
+        psi_rot = rotate(psi_i, angle=sign * angle_2, axes=(0, 2), reshape=True, order=3)
+        logger.debug(f"Rotated wavefunction around y-axis by angle_2 ({sign * angle_2} degrees).")
+    else:
+        psi_tensor = torch.tensor(psi, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
+        grid_1 = precompute_torch_rotation_grid(psi.shape, sign * angle_1, axes=(0, 1), device=device)
+        psi_i = torch.nn.functional.grid_sample(psi_tensor, grid_1, mode='bilinear', align_corners=True)
+        logger.debug(f"Rotated wavefunction around z-axis by angle_1 ({sign * angle_1} degrees).")
+        grid_2 = precompute_torch_rotation_grid(psi.shape, sign * angle_2, axes=(0, 2), device=device)
+        psi_rot_tensor = torch.nn.functional.grid_sample(psi_i, grid_2, mode='bilinear', align_corners=True)
+        logger.debug(f"Rotated wavefunction around y-axis by angle_2 ({sign * angle_2} degrees).")
+        psi_rot = psi_rot_tensor.squeeze()
 
-    # Perform the second rotation
-    psi_rot = rotate(psi_i, angle=sign * angle_2, axes=(0, 2), reshape=True)
-    logger.debug(f"Rotated wavefunction around y-axis by angle_2 ({sign * angle_2} degrees).")
-
-    # Set axis assignment
     axis_id = np.array([0, 1, 2], dtype=int)
     logger.debug(f"Axis assignment: {axis_id}")
-
-    # Set parallel and perpendicular coordinates
+    # Update real space coordinates
     N_par = psi_rot.shape[axis_id[0]]
     r_par = np.linspace(0, N_par - 1, N_par)
-    N_perp_0, N_perp_1 = psi_rot.shape[axis_id[1]], psi_rot.shape[axis_id[2]]
-    r_perp_0 = np.linspace(0, N_perp_0 - 1, N_perp_0)
-    r_perp_1 = np.linspace(0, N_perp_1 - 1, N_perp_1)
+    r_perp_0 = np.linspace(0, psi_rot.shape[axis_id[1]] - 1, psi_rot.shape[axis_id[1]])
+    r_perp_1 = np.linspace(0, psi_rot.shape[axis_id[2]] - 1, psi_rot.shape[axis_id[2]])
 
-    # Set the sign of the parallel coordinate
+    # Set the sign of the parallel coordinate according to the direction sign
     r_par *= sign
     logger.debug(f"Adjusted parallel coordinates with direction sign: {sign}")
+
+    # Convert to PyTorch tensors if needed for tensordot operations
+    if use_torch:
+       r_par = torch.tensor(r_par, device=device, dtype=torch.float32)
+       r_perp_0 = torch.tensor(r_perp_0, device=device, dtype=torch.float32)
+       r_perp_1 = torch.tensor(r_perp_1, device=device, dtype=torch.float32)
+       if torch_tensordot_only:
+           psi_rot = torch.tensor(psi_rot, device=device, dtype=torch.float32)
 
     end_time = time.time()
     logger.info(f"rotate_psi_111 executed in {end_time - start_time:.6f} seconds")
 
     return psi_rot, r_par, r_perp_0, r_perp_1, axis_id
+
 
 def set_bundle_100(b, k_segment, k_structure):
     """
@@ -1210,19 +1448,144 @@ def process_bundle_chunk_111(chunk, k_segment, k_structure, psi_rot, r_par, r_pe
         phi_folded_chunk += np.sum(abs(phi_projection_unfolded) ** 2, axis=(1, 2))
     return phi_folded_chunk
 
+def process_bundle_chunk_100_torch(chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, device):
+    """
+    Processes a chunk of bundles for 100 segments using PyTorch.
+    """
+    phi_folded_chunk = torch.zeros(k_segment['phi_folded'].shape, device=device, dtype=torch.float32)
+
+    for b in chunk:
+        # Set up the bundle
+        bundle = set_bundle_100(b, k_segment, k_structure)
+        k0_perp_0 = torch.tensor(bundle['k_0_0'], device=device, dtype=torch.float32)
+        k0_perp_1 = torch.tensor(bundle['k_0_1'], device=device, dtype=torch.float32)
+
+        # Compute factor_perp
+        k00_x_rp0 = k0_perp_0[:, None] * r_perp_0[None, :]
+        k01_x_rp1 = k0_perp_1[:, None] * r_perp_1[None, :]
+        factor_perp = torch.exp(-1j * (k00_x_rp0[:, :, None, None] + k01_x_rp1[None, None, :, :]) * k_unit * dx).to(
+            dtype=torch.complex64
+        )
+
+        # Ensure psi_rot is complex for tensordot compatibility
+        psi_rot = psi_rot.to(dtype=torch.complex64)
+
+        # Compute psi_projection_unfolded
+        psi_projection_unfolded = torch.tensordot(
+            factor_perp, psi_rot, dims=([1, 3], [axis_id[1], axis_id[2]])
+        )
+
+        # Compute factor_par
+        kappa = torch.tensor(bundle['kappa'], device=device, dtype=torch.float32)
+        factor_par = torch.exp(-1j * (k_unit * kappa[:, :, None] * r_par[None, None, :]) * dx).to(dtype=torch.complex64)
+
+        # Compute phi_projection_unfolded
+        phi_projection_unfolded = torch.tensordot(
+            factor_par, psi_projection_unfolded, dims=([2], [2])
+        )
+
+        # Accumulate squared projections
+        phi_folded_chunk += torch.sum(torch.abs(phi_projection_unfolded) ** 2, dim=(1, 2, 3))
+
+    return phi_folded_chunk
+
+def process_bundle_chunk_110_torch(chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq, device):
+    """
+    Processes a chunk of bundles for 110 segments using PyTorch.
+    """
+    phi_folded_chunk = torch.zeros(k_segment['phi_folded'].shape, device=device, dtype=torch.float32)
+
+    for b, l in chunk:
+        # Generate the bundle
+        BZ = combinations_110_bis(k_segment, l, b, Nyq)
+        bundle = set_bundle_110(BZ, l, b, k_segment, k_structure)
+
+        k0_perp_0 = torch.tensor(bundle['k_0_0'], device=device, dtype=torch.float32)
+        k0_perp_1 = torch.tensor(bundle['k_0_1'], device=device, dtype=torch.float32)
+
+        # Compute factor_perp
+        factor_perp = torch.exp(-1j * (
+            k0_perp_0[:, None, None] * r_perp_0[None, :, None] +
+            k0_perp_1[:, None, None] * r_perp_1[None, None, :]
+        ) * k_unit * dx).to(dtype=torch.complex64)
+
+        # Ensure psi_rot is complex for tensordot compatibility
+        psi_rot = psi_rot.to(dtype=torch.complex64)
+
+        # Compute psi_projection_unfolded
+        psi_projection_unfolded = torch.tensordot(
+            factor_perp, psi_rot, dims=([1, 2], [axis_id[1], axis_id[2]])
+        )
+
+        # Compute factor_par
+        kappa = torch.tensor(bundle['kappa'], device=device, dtype=torch.float32)
+        factor_par = torch.exp(-1j * (k_unit * kappa[:, :, None] * r_par[None, None, :]) * dx).to(dtype=torch.complex64)
+
+        # Compute phi_projection_unfolded
+        phi_projection_unfolded = torch.tensordot(
+            factor_par, psi_projection_unfolded, dims=([2], [1])
+        )
+
+        # Accumulate squared projections
+        phi_folded_chunk += torch.sum(torch.abs(phi_projection_unfolded) ** 2, dim=(1, 2))
+
+    return phi_folded_chunk
+
+def process_bundle_chunk_111_torch(chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, device):
+    """
+    Processes a chunk of bundles for 111 segments using PyTorch.
+    """
+    phi_folded_chunk = torch.zeros(k_segment['phi_folded'].shape, device=device, dtype=torch.float32)
+
+    for b, w, l in chunk:
+        # Generate the bundle
+        BZ = combinations_111(w, l, b, k_segment)
+        bundle = set_bundle_111(BZ, w, l, b, k_segment, k_structure)
+
+        k0_perp_0 = torch.tensor(bundle['k_0_0'], device=device, dtype=torch.float32)
+        k0_perp_1 = torch.tensor(bundle['k_0_1'], device=device, dtype=torch.float32)
+
+        # Compute factor_perp
+        factor_perp = torch.exp(-1j * (
+            k0_perp_0[:, None, None] * r_perp_0[None, :, None] +
+            k0_perp_1[:, None, None] * r_perp_1[None, None, :]
+        ) * k_unit * dx).to(dtype=torch.complex64)
+
+        # Ensure psi_rot is complex for tensordot compatibility
+        psi_rot = psi_rot.to(dtype=torch.complex64)
+
+        # Compute psi_projection_unfolded
+        psi_projection_unfolded = torch.tensordot(
+            factor_perp, psi_rot, dims=([1, 2], [axis_id[1], axis_id[2]])
+        )
+
+        # Compute factor_par
+        kappa = torch.tensor(bundle['kappa'], device=device, dtype=torch.float32)
+        factor_par = torch.exp(-1j * (k_unit * kappa[:, :, None] * r_par[None, None, :]) * dx).to(dtype=torch.complex64)
+
+        # Compute phi_projection_unfolded
+        phi_projection_unfolded = torch.tensordot(
+            factor_par, psi_projection_unfolded, dims=([2], [1])
+        )
+
+        # Accumulate squared projections
+        phi_folded_chunk += torch.sum(torch.abs(phi_projection_unfolded) ** 2, dim=(1, 2))
+
+    return phi_folded_chunk
+
+
 def bse(psi, k_path, data):
     """
     Performs Band Structure Expansion (BSE) analysis on a wavefunction along a pre-defined k-path.
 
     Parameters:
-    - psi: 3D numpy array, the wavefunction data to be analyzed.
+    - psi: 3D array (NumPy or PyTorch), the wavefunction data to be analyzed.
     - k_path: list of dicts, each containing data on specific k-path segments.
     - data: dict, containing required parameters such as lattice parameter 'latt_par', spacing 'dx', and 'k_unit'.
 
     Returns:
-    - phi_folded_path: 1D numpy array, folded expansion coefficients for all segments in k_path.
+    - phi_folded_path: 1D array (NumPy), folded expansion coefficients for all segments in k_path.
     """
-
     start_time = time.time()
     logger.info("Starting BSE analysis...")
 
@@ -1230,20 +1593,25 @@ def bse(psi, k_path, data):
     a = data['latt_par']
     dx = data['dx']
     k_unit = data['k_unit']
-    
+    use_torch = data['use_torch']
+    device = data['device']
+    torch_tensordot_only = data['torch_tensordot_only']
+    # Check if running within a Slurm environment and use SLURM_CPUS_PER_TASK if available, otherwise use os.cpu_count()
+    n_cores = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
+    os.environ["OMP_NUM_THREADS"] = str(n_cores)
+    logger.info(f"Number of CPUs : {n_cores}")
+ 
+    if use_torch:
+        logger.info(f"Using PyTorch with device: {device}")
+        psi = torch.tensor(psi, device=device)  # Convert psi to PyTorch tensor and move to device
+
     # Prepare for BSE along pre-defined path    
     segments = len(k_path)
     k_structure = summary_k_path(k_path, segments, a / dx)
     Nyq = k_structure['Nyquist']
     n_100, n_110, n_111 = k_structure['n_dir']
 
-    # Check if running within a Slurm environment and use SLURM_CPUS_PER_TASK if available, otherwise use os.cpu_count()
-    n_cores = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
-    os.environ["OMP_NUM_THREADS"] = str(n_cores)
-
-    logger.info(f"Number of CPUs : {n_cores}")
-    chunk_multiplier = 1  # Adjusted to prevent excessive parallel overhead when cores are large
-    logger.info(f"Chunk multiplier : {chunk_multiplier}")
+    logger.info(f"Number of segments: 100 ({n_100}), 110 ({n_110}), 111 ({n_111})")
 
     # Expansion for the 100 segments
     for segment in range(n_100):
@@ -1252,35 +1620,222 @@ def bse(psi, k_path, data):
         k_segment = k_path[pos_100]
         k_segment['phi_folded'][:] = 0
         bundles = k_segment['N_bun']
-        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi(psi, k_segment)
+        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi(psi, k_segment, use_torch, device, torch_tensordot_only)
 
         # Calculate the number of tensordot operations for the 100 segment
         num_tensordot_operations = bundles
         logger.info(f"Segment {segment} (100) - Number of tensordot operations: {num_tensordot_operations}")
 
-        # Determine cores to use based on the number of operations
-        cores_to_use = min(n_cores, num_tensordot_operations)
-        logger.info(f"Segment {segment} (100) - Using {cores_to_use} cores")
+    # Expansion for the 100 segments
+    for segment in range(n_100):
+        segment_start = time.time()
+        pos_100 = int(k_structure['pos_dir'][0, segment])
+        k_segment = k_path[pos_100]
+        k_segment['phi_folded'][:] = 0
+        bundles = k_segment['N_bun']
+        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi(psi, k_segment, use_torch, device, torch_tensordot_only)
 
-        chunk_size = max(1, num_tensordot_operations // cores_to_use)
-        chunked_bundles = list(chunked_iterable(range(bundles), chunk_size))
-
-        # Process chunks in parallel if applicable
-        if num_tensordot_operations > 1:
-            results = Parallel(n_jobs=cores_to_use)(
-                delayed(process_bundle_chunk_100)(
-                    chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+        if use_torch:
+            chunk_size = max(1, bundles)
+            chunked_bundles = list(chunked_iterable(range(bundles), chunk_size))
+            for chunk in chunked_bundles:
+                phi_folded = process_bundle_chunk_100_torch(
+                    chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, device
                 )
-                for chunk in chunked_bundles
-            )
-
-            for phi_folded in results:
-                k_segment['phi_folded'] += phi_folded
+                k_segment['phi_folded'] += phi_folded.cpu().numpy()
         else:
-            for b in range(bundles):
-                k_segment['phi_folded'] += process_bundle_chunk_100(
-                    [b], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+            num_tensordot_operations = bundles
+            if num_tensordot_operations > 1:
+                cores_to_use = min(n_cores, num_tensordot_operations)
+                chunk_size = max(1, num_tensordot_operations // cores_to_use)
+                chunked_bundles = list(chunked_iterable(range(bundles), chunk_size))
+                results = Parallel(n_jobs=cores_to_use)(
+                    delayed(process_bundle_chunk_100)(
+                        chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+                    ) for chunk in chunked_bundles
                 )
+                for phi_folded in results:
+                    k_segment['phi_folded'] += phi_folded
+            else:
+                for b in range(bundles):
+                    k_segment['phi_folded'] += process_bundle_chunk_100(
+                        [b], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+                    )
+
+        logger.info(f"Segment {segment} (100) processed in {time.time() - segment_start:.4f} seconds")
+
+    # Expansion for the 110 segments
+    for segment in range(n_110):
+        segment_start = time.time()
+        pos_110 = int(k_structure['pos_dir'][1, segment])
+        k_segment = k_path[pos_110]
+        k_segment['phi_folded'][:] = 0
+        bundles = k_segment['N_bun']
+        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi(psi, k_segment, use_torch, device, torch_tensordot_only)
+
+        tensordot_operations = [(b, l) for b in range(bundles) for l in range(2 * Nyq + 1 - b)]
+
+        if use_torch:
+            chunk_size = max(1, len(tensordot_operations))
+            chunked_operations = [tensordot_operations[i:i + chunk_size]
+                                  for i in range(0, len(tensordot_operations), chunk_size)]
+            for chunk in chunked_operations:
+                phi_folded = process_bundle_chunk_110_torch(
+                    chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq, device
+                )
+                k_segment['phi_folded'] += phi_folded.cpu().numpy()
+        else:
+            num_tensordot_operations = len(tensordot_operations)
+            if num_tensordot_operations > 1:
+                cores_to_use = min(n_cores, num_tensordot_operations)
+                chunk_size = max(1, num_tensordot_operations // cores_to_use)
+                chunked_operations = [tensordot_operations[i:i + chunk_size]
+                                      for i in range(0, num_tensordot_operations, chunk_size)]
+                results = Parallel(n_jobs=cores_to_use)(
+                    delayed(process_bundle_chunk_110)(
+                        chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq
+                    ) for chunk in chunked_operations
+                )
+                for phi_folded in results:
+                    k_segment['phi_folded'] += phi_folded
+            else:
+                for b, l in tensordot_operations:
+                    k_segment['phi_folded'] += process_bundle_chunk_110(
+                        [(b, l)], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq
+                    )
+
+        logger.info(f"Segment {segment} (110) processed in {time.time() - segment_start:.4f} seconds")
+
+    # Expansion for the 111 segments
+    for segment in range(n_111):
+        segment_start = time.time()
+        pos_111 = int(k_structure['pos_dir'][2, segment])
+        k_segment = k_path[pos_111]
+        k_segment['phi_folded'][:] = 0
+        bundles = k_segment['N_bun']
+        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi_111(psi, k_segment, use_torch, device, torch_tensordot_only)
+
+        bundle_width_layer_combinations = [
+            (b, w, l) for b in range(bundles)
+            for w in range(2 * Nyq + 1 - b)
+            for l in range(w + 1)
+        ]
+
+        if use_torch:
+            chunk_size = max(1, len(bundle_width_layer_combinations))
+            chunked_combinations = [bundle_width_layer_combinations[i:i + chunk_size]
+                                    for i in range(0, len(bundle_width_layer_combinations), chunk_size)]
+            for chunk in chunked_combinations:
+                phi_folded = process_bundle_chunk_111_torch(
+                    chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, device
+                )
+                k_segment['phi_folded'] += phi_folded.cpu().numpy()
+        else:
+            num_tensordot_operations = len(bundle_width_layer_combinations)
+            if num_tensordot_operations > 1:
+                cores_to_use = min(n_cores, num_tensordot_operations)
+                chunk_size = max(1, num_tensordot_operations // cores_to_use)
+                chunked_combinations = [bundle_width_layer_combinations[i:i + chunk_size]
+                                        for i in range(0, num_tensordot_operations, chunk_size)]
+                results = Parallel(n_jobs=cores_to_use)(
+                    delayed(process_bundle_chunk_111)(
+                        chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+                    ) for chunk in chunked_combinations
+                )
+                for phi_folded in results:
+                    k_segment['phi_folded'] += phi_folded
+            else:
+                for b, w, l in bundle_width_layer_combinations:
+                    k_segment['phi_folded'] += process_bundle_chunk_111(
+                        [(b, w, l)], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+                    )
+
+        logger.info(f"Segment {segment} (111) processed in {time.time() - segment_start:.4f} seconds")
+
+    # Organize and transfer the results to a single 1D array
+    logger.info("Organizing folded path results...")
+    phi_folded_path = organize_output_phi(k_path)
+    logger.info(f"BSE analysis completed in {time.time() - start_time:.4f} seconds.")
+
+    return phi_folded_path
+
+def bse(psi, k_path, data):
+    """
+    Performs Band Structure Expansion (BSE) analysis on a wavefunction along a pre-defined k-path.
+
+    Parameters:
+    - psi: 3D array (NumPy or PyTorch), the wavefunction data to be analyzed.
+    - k_path: list of dicts, each containing data on specific k-path segments.
+    - data: dict, containing required parameters such as lattice parameter 'latt_par', spacing 'dx', and 'k_unit'.
+
+    Returns:
+    - phi_folded_path: 1D array (NumPy), folded expansion coefficients for all segments in k_path.
+    """
+    start_time = time.time()
+    logger.info("Starting BSE analysis...")
+
+    # Get calculation data
+    a = data['latt_par']
+    dx = data['dx']
+    k_unit = data['k_unit']
+    use_torch = data['use_torch']
+    device = data['device']
+    torch_tensordot_only = data['torch_tensordot_only']
+    n_cores = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
+
+    if use_torch:
+        logger.info(f"Using PyTorch with device: {device}")
+        psi = torch.tensor(psi, device=device)  # Convert psi to PyTorch tensor and move to device
+
+    # Prepare for BSE along pre-defined path    
+    segments = len(k_path)
+    k_structure = summary_k_path(k_path, segments, a / dx)
+    Nyq = k_structure['Nyquist']
+    n_100, n_110, n_111 = k_structure['n_dir']
+
+    logger.info(f"Number of segments: 100 ({n_100}), 110 ({n_110}), 111 ({n_111})")
+
+    # Expansion for the 100 segments
+    for segment in range(n_100):
+        segment_start = time.time()
+        pos_100 = int(k_structure['pos_dir'][0, segment])
+        k_segment = k_path[pos_100]
+        k_segment['phi_folded'][:] = 0
+        bundles = k_segment['N_bun']
+        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi(psi, k_segment, use_torch, device, torch_tensordot_only)
+
+        # Calculate the number of tensordot operations for the 100 segment
+        num_tensordot_operations = bundles
+        logger.info(f"Segment {segment} (100) - Number of tensordot operations: {num_tensordot_operations}")
+        
+        if use_torch:
+            chunk_size = max(1, bundles)
+            chunked_bundles = list(chunked_iterable(range(bundles), chunk_size))
+            for chunk in chunked_bundles:
+                phi_folded = process_bundle_chunk_100_torch(
+                    chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, device
+                )
+                k_segment['phi_folded'] += phi_folded.cpu().numpy()
+        else:
+            if num_tensordot_operations > 1:
+                # Determine cores to use based on the number of operations
+                cores_to_use = min(n_cores, num_tensordot_operations)
+                logger.info(f"Segment {segment} (100) - Using {cores_to_use} cores")
+
+                chunk_size = max(1, num_tensordot_operations // cores_to_use)
+                chunked_bundles = list(chunked_iterable(range(bundles), chunk_size))
+                results = Parallel(n_jobs=cores_to_use)(
+                    delayed(process_bundle_chunk_100)(
+                        chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+                    ) for chunk in chunked_bundles
+                )
+                for phi_folded in results:
+                    k_segment['phi_folded'] += phi_folded
+            else:
+                for b in range(bundles):
+                    k_segment['phi_folded'] += process_bundle_chunk_100(
+                        [b], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+                    )
 
         logger.info(f"Segment {segment} (100) processed in {time.time() - segment_start:.4f} seconds")
     logger.info(f"{n_100} 100 segments processed")
@@ -1292,37 +1847,41 @@ def bse(psi, k_path, data):
         k_segment = k_path[pos_110]
         k_segment['phi_folded'][:] = 0
         bundles = k_segment['N_bun']
-        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi(psi, k_segment)
+        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi(psi, k_segment, use_torch, device, torch_tensordot_only)
 
-        # Calculate total tensordot operations for the 110 segment
         tensordot_operations = [(b, l) for b in range(bundles) for l in range(2 * Nyq + 1 - b)]
         num_tensordot_operations = len(tensordot_operations)
         logger.info(f"Segment {segment} (110) - Number of tensordot operations: {num_tensordot_operations}")
 
-        # Determine cores to use based on the number of operations
-        cores_to_use = min(n_cores, num_tensordot_operations)
-        logger.info(f"Segment {segment} (110) - Using {cores_to_use} cores")
-
-        chunk_size = max(1, num_tensordot_operations // cores_to_use)
-        chunked_operations = [tensordot_operations[i:i + chunk_size] for i in range(0, num_tensordot_operations, chunk_size)]
-
-        # Process chunks in parallel if applicable
-        if num_tensordot_operations > 1:
-            results = Parallel(n_jobs=cores_to_use)(
-                delayed(process_bundle_chunk_110)(
-                    chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq
+        if use_torch:
+            chunk_size = max(1, len(tensordot_operations))
+            chunked_operations = [tensordot_operations[i:i + chunk_size]
+                                  for i in range(0, len(tensordot_operations), chunk_size)]
+            for chunk in chunked_operations:
+                phi_folded = process_bundle_chunk_110_torch(
+                    chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq, device
                 )
-                for chunk in chunked_operations
-            )
-
-            # Sum the results from each chunk
-            for phi_folded in results:
-                k_segment['phi_folded'] += phi_folded
+                k_segment['phi_folded'] += phi_folded.cpu().numpy()
         else:
-            for b, l in tensordot_operations:
-                k_segment['phi_folded'] += process_bundle_chunk_110(
-                    [(b, l)], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq
+            if num_tensordot_operations > 1:
+                cores_to_use = min(n_cores, num_tensordot_operations)
+                logger.info(f"Segment {segment} (110) - Using {cores_to_use} cores")
+
+                chunk_size = max(1, num_tensordot_operations // cores_to_use)
+                chunked_operations = [tensordot_operations[i:i + chunk_size]
+                                      for i in range(0, num_tensordot_operations, chunk_size)]
+                results = Parallel(n_jobs=cores_to_use)(
+                    delayed(process_bundle_chunk_110)(
+                        chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq
+                    ) for chunk in chunked_operations
                 )
+                for phi_folded in results:
+                    k_segment['phi_folded'] += phi_folded
+            else:
+                for b, l in tensordot_operations:
+                    k_segment['phi_folded'] += process_bundle_chunk_110(
+                        [(b, l)], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, Nyq
+                    )
 
         logger.info(f"Segment {segment} (110) processed in {time.time() - segment_start:.4f} seconds")
     logger.info(f"{n_110} 110 segments processed")
@@ -1334,9 +1893,8 @@ def bse(psi, k_path, data):
         k_segment = k_path[pos_111]
         k_segment['phi_folded'][:] = 0
         bundles = k_segment['N_bun']
-        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi_111(psi, k_segment)
+        psi_rot, r_par, r_perp_0, r_perp_1, axis_id = rotate_psi_111(psi, k_segment, use_torch, device, torch_tensordot_only)
 
-        # Calculate total tensordot operations for the 111 segment
         bundle_width_layer_combinations = [
             (b, w, l) for b in range(bundles)
             for w in range(2 * Nyq + 1 - b)
@@ -1345,25 +1903,34 @@ def bse(psi, k_path, data):
         num_tensordot_operations = len(bundle_width_layer_combinations)
         logger.info(f"Segment {segment} (111) - Number of tensordot operations: {num_tensordot_operations}")
 
-        # Determine cores to use based on the number of operations
-        cores_to_use = min(n_cores, num_tensordot_operations)
-        logger.info(f"Segment {segment} (111) - Using {cores_to_use} cores")
-
-        chunk_size = max(1, num_tensordot_operations // cores_to_use)
-        chunked_combinations = [bundle_width_layer_combinations[i:i + chunk_size]
-                                for i in range(0, num_tensordot_operations, chunk_size)]
-
-        # Process chunks in parallel if applicable
-        results = Parallel(n_jobs=cores_to_use)(
-            delayed(process_bundle_chunk_111)(
-                chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
-            )
-            for chunk in chunked_combinations
-        )
-
-        # Sum the results from each chunk
-        for phi_folded in results:
-            k_segment['phi_folded'] += phi_folded
+        if use_torch:
+            chunk_size = max(1, len(bundle_width_layer_combinations))
+            chunked_combinations = [bundle_width_layer_combinations[i:i + chunk_size]
+                                    for i in range(0, len(bundle_width_layer_combinations), chunk_size)]
+            for chunk in chunked_combinations:
+                phi_folded = process_bundle_chunk_111_torch(
+                    chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx, device
+                )
+                k_segment['phi_folded'] += phi_folded.cpu().numpy()
+        else:
+            if num_tensordot_operations > 1:
+                cores_to_use = min(n_cores, num_tensordot_operations)
+                logger.info(f"Segment {segment} (111) - Using {cores_to_use} cores")
+                chunk_size = max(1, num_tensordot_operations // cores_to_use)
+                chunked_combinations = [bundle_width_layer_combinations[i:i + chunk_size]
+                                        for i in range(0, num_tensordot_operations, chunk_size)]
+                results = Parallel(n_jobs=cores_to_use)(
+                    delayed(process_bundle_chunk_111)(
+                        chunk, k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+                    ) for chunk in chunked_combinations
+                )
+                for phi_folded in results:
+                    k_segment['phi_folded'] += phi_folded
+            else:
+                for b, w, l in bundle_width_layer_combinations:
+                    k_segment['phi_folded'] += process_bundle_chunk_111(
+                        [(b, w, l)], k_segment, k_structure, psi_rot, r_par, r_perp_0, r_perp_1, axis_id, k_unit, dx
+                    )
 
         logger.info(f"Segment {segment} (111) processed in {time.time() - segment_start:.4f} seconds")
     logger.info(f"{n_111} 111 segments processed")
@@ -1374,6 +1941,7 @@ def bse(psi, k_path, data):
     logger.info(f"BSE analysis completed in {time.time() - start_time:.4f} seconds.")
 
     return phi_folded_path
+
 
 def write_path(project, k_path_names, kappa_ticks, kappa):
     """

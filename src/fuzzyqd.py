@@ -136,12 +136,26 @@ def perform_bse_calculations(params):
     dk = params['reciprocal_space'].get('dk', 0.005)
     dE = params.get('energy_binning', {}).get('dE', 0.0125) / hartree
 
+    # Read `use_torch` and `device` settings from the YAML file
+    use_torch = params['settings'].get('use_torch', False)
+    device = params['settings'].get('device', 'cpu')
+    torch_tensordot_only = params['settings'].get('torch_tensordot_only', True) 
+
     if params['settings']['fcc']:
         for direction in bse.e_k_dict:
             direction['N_bun'] = 2
         k_unit *= 2
 
-    calculation_data = {'latt_par': a, 'k_unit': k_unit, 'dx': 1, 'clip': clip, 'frame': size_clip if clip else None}
+    calculation_data = {
+        'latt_par': a,
+        'k_unit': k_unit,
+        'dx': 1,
+        'clip': clip,
+        'frame': size_clip if clip else None,
+        'use_torch': use_torch,  # Pass `use_torch` setting
+        'device': device,  # Pass `device` setting
+        'torch_tensordot_only': torch_tensordot_only
+    }
 
     # Define the k-path
     k_path_names = params['k_path']['names']

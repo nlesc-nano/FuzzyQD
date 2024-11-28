@@ -17,18 +17,48 @@ from logger_config import logger
 """Library of definitions needed for Bloch state expansion calculations"""
 
 def _getline(cube):
-    """
-    Read a line from cube file where the first field is an int 
-    and the remaining fields are floats.
-
-    Parameters:
-    cube (file object): File object of the cube file.
-
-    Returns:
-    tuple: (int, list of float), where the first element is an integer and the second is a list of floats.
-    """
     line = cube.readline().strip().split()
     return int(line[0]), list(map(float, line[1:]))
+
+def read_cube(fname):
+    start_time = time.time()
+    meta = {}
+    no_error = True
+
+    try:
+        with open(fname, 'r') as cube:
+            # Ignore comment lines
+            cube.readline(); cube.readline()
+
+            # Read coordinate data
+            natm, meta['org'] = _getline(cube)
+            nx, meta['xvec'] = _getline(cube)
+            ny, meta['yvec'] = _getline(cube)
+            nz, meta['zvec'] = _getline(cube)
+            meta['N_x'], meta['N_y'], meta['N_z'], meta['N'] = nx, ny, nz, natm
+
+            # Read atomic information
+            atom_Z = np.zeros(natm, dtype=int)
+            atom_pos = np.zeros((natm, 3), dtype=float)
+            for i in range(natm):
+                line = cube.readline().strip().split()
+                atom_Z[i] = int(line[0])
+                atom_pos[i, :] = list(map(float, line[2:]))
+
+            # Read the rest of the file into a single string
+            data_str = cube.read()
+
+        # Convert the string to a numpy array
+        data = np.fromstring(data_str, sep=' ', dtype=float)
+        data = data.reshape((nx, ny, nz))
+
+    except FileNotFoundError:
+        no_error = False
+        data, atom_Z, atom_pos = np.array([]), np.array([]), np.array([])
+
+    end_time = time.time()
+    logger.info(f"read_cube_optimized executed in {end_time - start_time:.6f} seconds")
+    return data, meta, atom_Z, atom_pos, no_error
 
 def read_dummy_cube(path):
     """
@@ -63,52 +93,6 @@ def read_dummy_cube(path):
     end_time = time.time()
     logger.debug(f"read_dummy_cube executed in {end_time - start_time:.6f} seconds")
     return data, meta
-
-def read_cube(fname):
-    """
-    Reads all information from a cube file, including metadata, atomic information, and grid data.
-
-    Parameters:
-    fname (str): The path to the cube file.
-
-    Returns:
-    tuple: Data in a 3D numpy array, metadata dictionary, atomic numbers array, atomic positions array, and a boolean indicating success.
-    """
-    start_time = time.time()
-    meta = {}
-    no_error = True
-    
-    try:
-        with open(fname, 'r') as cube:
-            # Ignore comment lines
-            cube.readline(); cube.readline()
-            
-            # Read coordinate data
-            natm, meta['org'] = _getline(cube)
-            nx, meta['xvec'] = _getline(cube)
-            ny, meta['yvec'] = _getline(cube)
-            nz, meta['zvec'] = _getline(cube)
-            meta['N_x'], meta['N_y'], meta['N_z'], meta['N'] = nx, ny, nz, natm
-            
-            # Read atomic information
-            atom_Z = np.zeros(natm, dtype=int)
-            atom_pos = np.zeros((natm, 3), dtype=float)
-            for i in range(natm):
-                line = cube.readline().strip().split()
-                atom_Z[i] = int(line[0])
-                atom_pos[i, :] = list(map(float, line[2:]))
-            
-            # Read data in a more efficient way
-            data = np.fromiter((float(val) for line in cube for val in line.strip().split()), dtype=float)
-            data = data.reshape((nx, ny, nz))
-    
-    except FileNotFoundError:
-        no_error = False
-        data, atom_Z, atom_pos = np.array([]), np.array([]), np.array([])
-    
-    end_time = time.time()
-    logger.info(f"read_cube executed in {end_time - start_time:.6f} seconds")
-    return data, meta, atom_Z, atom_pos, no_error
 
 def set_index(e_k):
     """

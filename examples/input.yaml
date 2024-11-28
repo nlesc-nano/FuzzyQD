@@ -1,33 +1,30 @@
 lattice:
-  a: 5.5973  # Real space lattice parameter in Angstrom
-
+  a: 4.508 
 clipping:
-  clip: false  # Set to true to enable clipping, false to disable (default is false)
-  # size_clip: 4  # Width of the frame to keep in Angstrom, required if clip is true
-
+  clip: false
 reciprocal_space:
-  dk: 0.005  # Reciprocal space resolution in units 2 * pi / a (optional, default is 0.005)
-
-k_path:
-  names: ['L', 'G', 'Xx', 'W', 'K', 'G', 'Xy']  # Names of k-path points
-  points:
-    - [0.250, 0.250, 0.250]
-    - [0.000, 0.000, 0.000]
-    - [0.500, 0.000, 0.000]
-    - [0.500, 0.250, 0.000]
-    - [0.375, 0.375, 0.000]
-    - [0.000, 0.000, 0.000]
-    - [0.000, 0.500, 0.000]
-
+  dk: 0.005
 files:
-  folder_cubes: '.'  # Folder containing cube files
-  Project: 'GaAs'  # Project name
-  cube_0: 1237  # Index number for the first cube file (optional, default is 5542)
-  blocks: 4  # Index for the block being processed (manually set by the user)
-
+  folder_cubes: .
+  Project: CdO_1532_full_AcO 
+  cube_0: 8561
+  block_index: 1
+  N_cube: 1 
 settings:
-  fcc: true  # FCC crystal flag
-  cube_input: true  # Whether to use cube files as input
-
+  use_torch: false  
+  device: 'cpu' 
+  torch_tensordot_only: false 
+  fcc: true
+  cube_input: true
 logging:
   level: INFO 
+
+k_path:
+  names: ['K', 'G', 'L', 'W', 'X', 'G']
+  points:
+    - [0.375, 0.375, 0.0]
+    - [0.0, 0.0, 0.0]
+    - [0.25, 0.25, 0.25]
+    - [0.25, 0.5, 0.0]
+    - [0.0, 0.5, 0.0]
+    - [0.0, 0.0, 0.0]

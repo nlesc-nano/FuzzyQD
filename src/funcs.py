@@ -395,7 +395,7 @@ def apply_precomputed_grid(data, grid):
     coords = [grid[i] for i in range(3)]
 
     # Interpolate the data at the new coordinates
-    rotated = map_coordinates(data, coords, order=3, mode='constant', cval=0)
+    rotated = map_coordinates(data, coords, order=1, mode='constant', cval=0)
     return rotated
 
 def precompute_torch_rotation_grid(shape, angle, axes, device='cpu'):
@@ -566,12 +566,12 @@ def rotate_psi(psi, k_segment, use_torch, device, torch_tensordot_only):
         if torch_tensordot_only:
             # Use NumPy for rotation
             if abs(dir_k[2]) < 1e-6:
-                psi_rot = rotate(psi_rot, angle=angle_1, axes=(0, 1), reshape=True, order=3)
+                psi_rot = rotate(psi_rot, angle=angle_1, axes=(0, 1), reshape=True, order=1)
             elif abs(dir_k[1]) < 1e-6:
-                psi_rot = rotate(psi_rot, angle=angle_2, axes=(0, 2), reshape=True, order=3)
+                psi_rot = rotate(psi_rot, angle=angle_2, axes=(0, 2), reshape=True, order=1)
             elif abs(dir_k[0]) < 1e-6:
-                psi_i = rotate(psi_rot, angle=angle_1, axes=(0, 1), reshape=True, order=3)
-                psi_rot = rotate(psi_i, angle=angle_2, axes=(0, 2), reshape=True, order=3)
+                psi_i = rotate(psi_rot, angle=angle_1, axes=(0, 1), reshape=True, order=1)
+                psi_rot = rotate(psi_i, angle=angle_2, axes=(0, 2), reshape=True, order=1)
         else:
             # Use PyTorch for rotation
             psi_tensor = torch.tensor(psi, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
@@ -644,9 +644,9 @@ def rotate_psi_111(psi, k_segment, use_torch, device, torch_tensordot_only):
     logger.debug(f"Rotation angles: angle_1 = {angle_1}, angle_2 = {angle_2}, sign = {sign}")
 
     if torch_tensordot_only:
-        psi_i = rotate(psi, angle=sign * angle_1, axes=(0, 1), reshape=True, order=3)
+        psi_i = rotate(psi, angle=sign * angle_1, axes=(0, 1), reshape=True, order=1)
         logger.debug(f"Rotated wavefunction around z-axis by angle_1 ({sign * angle_1} degrees).")
-        psi_rot = rotate(psi_i, angle=sign * angle_2, axes=(0, 2), reshape=True, order=3)
+        psi_rot = rotate(psi_i, angle=sign * angle_2, axes=(0, 2), reshape=True, order=1)
         logger.debug(f"Rotated wavefunction around y-axis by angle_2 ({sign * angle_2} degrees).")
     else:
         psi_tensor = torch.tensor(psi, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)

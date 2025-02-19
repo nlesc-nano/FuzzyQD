@@ -26,6 +26,7 @@ setup(
         'h5py',
         'PyYAML',
         'scipy',
+        'torch',
         'joblib'
     ],
     classifiers=[

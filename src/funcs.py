@@ -1256,7 +1256,7 @@ def bse_cube(file_specifiers, k_path, kappa_path, data):
         
         file_name = (
             f"{file_specifiers['Project']}{file_specifiers['WFN']}"
-            f"{cube_i}{file_specifiers['Addition']}.{file_specifiers['extension'][0]}"
+            f"{cube_i:05d}{file_specifiers['Addition']}.{file_specifiers['extension'][0]}"
         )
         logger.info(f"try open {file_name}")
         

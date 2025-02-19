@@ -87,7 +87,7 @@ def modify_yaml_for_block(block_yaml_path, params, block_files, block_index, blo
         if not cube_files_in_block:
             raise ValueError(f"No .cube files found in block folder '{block_folder}'")
         first_cube_file = os.path.basename(cube_files_in_block[0])
-        match = re.search(r'WFN_0(\d+)', first_cube_file)
+        match = re.search(r'WFN_(\d+)', first_cube_file)
         if match:
             first_cube_index = int(match.group(1))
             block_params['files']['cube_0'] = first_cube_index
@@ -169,7 +169,7 @@ def perform_bse_calculations(params):
         'cube_0': params['files'].get('cube_0', 5542),
         'N_cube': params['files'].get('N_cube', 300),
         'State': 'STATES',
-        'WFN': '-WFN_0',
+        'WFN': '-WFN_',
         'Addition': '_1-1_0',
         'h5_file': 'cubedata_inp',
         'Energy': 'E',
